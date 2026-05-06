@@ -11,7 +11,11 @@ GET  /scores/musescore/status — check whether MuseScore binary is available
 from __future__ import annotations
 import io
 import os
+import re
 import uuid
+import wave
+import struct
+import math
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -39,9 +43,9 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _save_upload(user_id: int, filename: str, file_type: str, data: bytes) -> str:
+def _save_upload(user_id, filename, file_type, data):
     ext = Path(filename).suffix.lower()
-    stored_name = f"{user_id}_{uuid.uuid4().hex}{ext}"
+    stored_name = "{}_{}{}".format(user_id, uuid.uuid4().hex, ext)
     stored_path = UPLOAD_DIR / stored_name
     stored_path.write_bytes(data)
     with get_conn() as conn:
@@ -244,3 +248,270 @@ def musescore_status(_: dict = Depends(get_current_user)):
             else "MuseScore not found. Install MuseScore 3/4 or set MUSESCORE_BIN env var."
         ),
     }
+
+
+@router.post("/metronome")
+async def generate_metronome(
+    tempo_bpm: int,
+    time_signature: str = "4/4",
+    duration_beats: int = 8,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Generate a simple metronome click track (WAV).
+    Parameters:
+    - tempo_bpm: Beats per minute
+    - time_signature: e.g., "4/4", "3/4", "6/8"
+    - duration_beats: Number of beats to generate
+    
+    Returns WAV file with metronome clicks.
+    """
+    sample_rate = 44100
+    frequency = 1000  # Hz
+    beat_duration = 60 / tempo_bpm  # seconds per beat
+    samples_per_beat = int(sample_rate * beat_duration)
+    click_length = int(sample_rate * 0.05)  # 50ms clicks
+    
+    audio_data = bytearray()
+    beats_per_measure = int(time_signature.split("/")[0])
+    
+    for beat in range(duration_beats):
+        # Accent first beat of measure (louder)
+        is_accented = (beat % beats_per_measure) == 0
+        amplitude = 32000 if is_accented else 16000
+        
+        # Generate sine wave click
+        for i in range(click_length):
+            phase = 2 * math.pi * frequency * i / sample_rate
+            sample = int(amplitude * math.sin(phase))
+            audio_data.extend(struct.pack('<h', sample))
+        
+        # Silence until next beat
+        silence = samples_per_beat - click_length
+        audio_data.extend(b'\x00' * (silence * 2))
+    
+    # Create WAV buffer
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, 'wb') as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(bytes(audio_data))
+    
+    wav_bytes = wav_buffer.getvalue()
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={"Content-Disposition": "attachment; filename=\"metronome.wav\""},
+    )
+
+
+@router.post("/rhythm-info")
+async def get_rhythm_info(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Extract detailed rhythm, time signature, tempo, and marking information.
+    Returns RhythmInfo with all timing details.
+    """
+    data = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+    
+    if ext not in (".xml", ".musicxml", ".mxl"):
+        raise HTTPException(
+            status_code=422,
+            detail="Rhythm analysis requires a MusicXML file.",
+        )
+    
+    report = analyze_musicxml(data)
+    return {
+        "rhythm_info": report.rhythm_info.to_dict() if report.rhythm_info else None,
+        "rest_alerts": [r.to_dict() for r in (report.rest_alerts or [])],
+        "complex_markings": [m.to_dict() for m in (report.complex_markings or [])],
+        "rehearsal_letters": report.rehearsal_letters,
+    }
+
+
+@router.post("/extract-parts")
+async def extract_parts(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Extract individual instrumental parts from a score.
+    Returns a list of available parts with their names and part IDs.
+    """
+    data = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+    
+    if ext not in (".xml", ".musicxml", ".mxl"):
+        raise HTTPException(
+            status_code=422,
+            detail="Part extraction requires a MusicXML file.",
+        )
+    
+    text = data.decode("utf-8", errors="ignore")
+    
+    # Extract part list
+    parts = []
+    part_list_match = re.search(r'<part-list>(.*?)</part-list>', text, re.S)
+    if part_list_match:
+        part_list_body = part_list_match.group(1)
+        for score_part in re.finditer(r'<score-part\s+id="([^"]+)"[^>]*>(.*?)</score-part>', part_list_body, re.S):
+            part_id = score_part.group(1)
+            part_body = score_part.group(2)
+            
+            # Extract part name
+            name_match = re.search(r'<part-name[^>]*>([^<]+)</part-name>', part_body)
+            part_name = name_match.group(1) if name_match else f"Part {part_id}"
+            
+            # Extract abbreviation
+            abbr_match = re.search(r'<part-abbreviation[^>]*>([^<]+)</part-abbreviation>', part_body)
+            part_abbr = abbr_match.group(1) if abbr_match else part_name[:3]
+            
+            # Extract instrument
+            instr_match = re.search(r'<score-instrument\s+id="[^"]*"[^>]*>\s*<instrument-name[^>]*>([^<]+)</instrument-name>', part_body)
+            instrument = instr_match.group(1) if instr_match else "Unknown"
+            
+            parts.append({
+                "id": part_id,
+                "name": part_name,
+                "abbreviation": part_abbr,
+                "instrument": instrument,
+            })
+    
+    return {"parts": parts}
+
+
+@router.post("/training/synthesize")
+async def generate_synthesizer_track(
+    file: UploadFile = File(...),
+    tempo_override: int | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Generate a synthesized audio track from MusicXML score for training.
+    Uses basic note generation to create a reference playback.
+    
+    Returns WAV file with synthesized performance.
+    Phase 2: Full integration with score markings and dynamics.
+    """
+    data = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+    
+    if ext not in (".xml", ".musicxml", ".mxl"):
+        raise HTTPException(
+            status_code=422,
+            detail="Synthesizer requires a MusicXML file.",
+        )
+    
+    text = data.decode("utf-8", errors="ignore")
+    
+    # Extract tempo from score
+    tempo_match = re.search(r'<metronome>[\s\S]*?<per-minute>(\d+)</per-minute>', text)
+    tempo_bpm = tempo_override or (int(tempo_match.group(1)) if tempo_match else 120)
+    
+    # Extract time signature
+    time_sig_match = re.search(r'<time>\s*<beats>(\d+)</beats>\s*<beat-type>(\d+)</beat-type>', text)
+    beats_per_measure = int(time_sig_match.group(1)) if time_sig_match else 4
+    beat_unit = int(time_sig_match.group(2)) if time_sig_match else 4
+    
+    # Generate synthesized audio (simplified: just metronome for now)
+    sample_rate = 44100
+    beat_duration = 60 / tempo_bpm
+    
+    # Count notes for duration estimation
+    note_count = len(re.findall(r'<note\b', text))
+    estimated_beats = max(8, min(note_count // 4, 64))  # Estimate 4 notes per beat
+    
+    audio_data = bytearray()
+    frequency = 880  # A5 for synthesizer
+    
+    for beat in range(estimated_beats):
+        is_accented = (beat % beats_per_measure) == 0
+        amplitude = 24000 if is_accented else 12000
+        samples_per_beat = int(sample_rate * beat_duration)
+        note_length = int(samples_per_beat * 0.8)  # 80% of beat
+        
+        # Generate note
+        for i in range(note_length):
+            phase = 2 * math.pi * frequency * i / sample_rate
+            sample = int(amplitude * math.sin(phase))
+            audio_data.extend(struct.pack('<h', sample))
+        
+        # Silence
+        silence = samples_per_beat - note_length
+        audio_data.extend(b'\x00' * (silence * 2))
+    
+    # Create WAV
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, 'wb') as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(bytes(audio_data))
+    
+    return Response(
+        content=wav_buffer.getvalue(),
+        media_type="audio/wav",
+        headers={"Content-Disposition": "attachment; filename=\"synthesizer_track.wav\""},
+    )
+
+
+@router.post("/training/segments")
+async def extract_training_segments(
+    file: UploadFile = File(...),
+    segment_size: int = 4,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Break score into practice segments.
+    segment_size: number of measures per segment
+    
+    Returns list of segments with timing info.
+    Phase 2: Generate individual segment playback files.
+    """
+    data = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+    
+    if ext not in (".xml", ".musicxml", ".mxl"):
+        raise HTTPException(
+            status_code=422,
+            detail="Segment extraction requires a MusicXML file.",
+        )
+    
+    text = data.decode("utf-8", errors="ignore")
+    
+    # Extract measures
+    measures = []
+    measure_pattern = r'<measure\b[^>]*number="([^"]*)"[^>]*>(.*?)</measure>'
+    
+    for match in re.finditer(measure_pattern, text, re.S):
+        measure_num = int(match.group(1)) if match.group(1).isdigit() else 1
+        measure_body = match.group(2)
+        measures.append({
+            "number": measure_num,
+            "hasRests": bool(re.search(r'<rest\b', measure_body)),
+            "hasAccents": bool(re.search(r'<accent', measure_body)),
+        })
+    
+    # Group into segments
+    segments = []
+    for i in range(0, len(measures), segment_size):
+        segment_measures = measures[i:i+segment_size]
+        start_measure = segment_measures[0]["number"]
+        end_measure = segment_measures[-1]["number"]
+        
+        segments.append({
+            "segment_id": len(segments) + 1,
+            "start_measure": start_measure,
+            "end_measure": end_measure,
+            "measure_count": len(segment_measures),
+            "markings": {
+                "hasRests": any(m["hasRests"] for m in segment_measures),
+                "hasAccents": any(m["hasAccents"] for m in segment_measures),
+            },
+        })
+    
+    return {"segments": segments, "total_segments": len(segments)}

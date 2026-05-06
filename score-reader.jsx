@@ -126,6 +126,37 @@ function analyzeMarkings(mxmlText) {
   return results;
 }
  
+function extractScoreNoteNames(mxmlText) {
+  const notes = new Set();
+  const pitchBlocks = mxmlText.match(/<pitch>[\s\S]*?<\/pitch>/g) || [];
+  for (const pitch of pitchBlocks) {
+    const step = pitch.match(/<step>([^<]+)<\/step>/);
+    const alter = pitch.match(/<alter>([^<]+)<\/alter>/);
+    if (step) {
+      let note = step[1];
+      if (alter) {
+        note += alter[1] === "1" ? "#" : alter[1] === "-1" ? "b" : "";
+      }
+      notes.add(note);
+    }
+  }
+  return Array.from(notes);
+}
+ 
+function extractRestAlerts(mxmlText) {
+  const restAlerts = [];
+  const measureRegex = /<measure[^>]*number="([^\"]*)"[^>]*>([\s\S]*?)<\/measure>/g;
+  let match;
+  while ((match = measureRegex.exec(mxmlText))) {
+    const measureNumber = parseInt(match[1], 10) || null;
+    const body = match[2];
+    if (measureNumber && /<rest\b/.test(body)) {
+      restAlerts.push({ measure: measureNumber, restCount: (body.match(/<rest\b/g) || []).length });
+    }
+  }
+  return restAlerts;
+}
+ 
 // ─── Mock DB (localStorage) ───────────────────────────────────────────────────
  
 function dbGet(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } }
@@ -449,14 +480,26 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [score, setScore] = useState(null);
   const [scoreType, setScoreType] = useState(null);
   const [markings, setMarkings] = useState([]);
+  const [complexMarkings, setComplexMarkings] = useState([]);
+  const [restAlerts, setRestAlerts] = useState([]);
+  const [rhythmInfo, setRhythmInfo] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [currentFreq, setCurrentFreq] = useState(0);
   const [currentNote, setCurrentNote] = useState(null);
   const [currentMidi, setCurrentMidi] = useState(null);
   const [cents, setCents] = useState(0);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [isAutoScrollPaused, setIsAutoScrollPaused] = useState(false);
   const [sidebarTab, setSidebarTab] = useState("markings");
   const [showProfile, setShowProfile] = useState(false);
+  const [tempoPrompt, setTempoPrompt] = useState(false);
+  const [currentRestAlert, setCurrentRestAlert] = useState(null);
+  const [trainingMode, setTrainingMode] = useState(false);
+  const [trainingSegments, setTrainingSegments] = useState([]);
+  const [scoreNoteNames, setScoreNoteNames] = useState([]);
+  const [loopMode, setLoopMode] = useState("none");
+  const [osmdLoaded, setOsmdLoaded] = useState(false);
+  const [osmdError, setOsmdError] = useState(null);
   const scoreContainerRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -467,8 +510,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const osmdContainerRef = useRef(null);
   const noteHistoryRef = useRef([]);
   const [noteHistory, setNoteHistory] = useState([]);
-  const [osmdLoaded, setOsmdLoaded] = useState(false);
-  const [osmdError, setOsmdError] = useState(null);
+  const [settings, setSettings] = useState({
+    stopAtWrongNote: true,
+    loopOnWrongNote: false,
+    metronomeSource: "backend", // "backend" or "client"
+    metronomeEnabled: false,
+    restAlertEnabled: true,
+    restAlertAdvance: 2, // 2 beats before rest
+    pauseOnSilence: true,
+  });
+  
+  const [metronomeState, setMetronomeState] = useState({
+    isPlaying: false,
+    bpm: rhythmInfo?.tempo_bpm || 120,
+  });
+  
+  const audioElementRef = useRef(null);
  
   useEffect(() => {
     const script = document.createElement("script");
@@ -510,7 +567,51 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       const text = await file.text();
       setScore(text);
       setScoreType("musicxml");
-      setMarkings(analyzeMarkings(text));
+      
+      // Analyze markings locally
+      const baseMarkings = analyzeMarkings(text);
+      setMarkings(baseMarkings);
+      
+      // Extract rhythm info and complex markings
+      const rhythmMatch = text.match(/<time>\s*<beats>(\d+)<\/beats>\s*<beat-type>(\d+)<\/beat-type>/);
+      const timeSignature = rhythmMatch ? `${rhythmMatch[1]}/${rhythmMatch[2]}` : "4/4";
+      
+      const tempoMatch = text.match(/<metronome>[\s\S]*?<per-minute>(\d+)<\/per-minute>/);
+      const tempo = tempoMatch ? parseInt(tempoMatch[1]) : 120;
+      
+      const noteCount = (text.match(/<note\b/g) || []).length;
+      const restCount = (text.match(/<rest\b/g) || []).length;
+      
+      setRhythmInfo({
+        time_signature: timeSignature,
+        tempo_bpm: tempo,
+        note_count: noteCount,
+        rest_count: restCount,
+      });
+      
+      setMetronomeState(prev => ({ ...prev, bpm: tempo }));
+      setCurrentRestAlert(null);
+      setTrainingSegments([]);
+      setScoreNoteNames(extractScoreNoteNames(text));
+      setRestAlerts(extractRestAlerts(text));
+      
+      // Extract complex markings
+      const markingsList = [];
+      const measures = text.match(/<measure[^>]*number="([^"]*)"[^>]*>([\s\S]*?)<\/measure>/g) || [];
+      measures.forEach(measure => {
+        const measureMatch = measure.match(/number="([^"]*)"/);
+        const measureNum = measureMatch ? parseInt(measureMatch[1]) : 0;
+        if (measure.includes("<accent") || measure.includes("<staccato") || measure.includes("<tenuto")) {
+          markingsList.push({ measure: measureNum, type: "articulation", value: "accent/staccato" });
+        }
+        if (measure.includes("<rest")) {
+          markingsList.push({ measure: measureNum, type: "rest", value: "rest" });
+        }
+        if (measure.includes("<fermata")) {
+          markingsList.push({ measure: measureNum, type: "fermata", value: "fermata" });
+        }
+      });
+      setComplexMarkings(markingsList);
     } else if (ext === "mscz" || ext === "mscx") {
       setScore(null);
       setScoreType("musescore");
@@ -520,6 +621,43 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     }
     e.target.value = "";
   }
+  
+  const startMetronome = useCallback(async () => {
+    if (!rhythmInfo) return;
+
+    try {
+      const response = await fetch(
+        `/playback/metronome?bpm=${metronomeState.bpm}&time_signature=${rhythmInfo.time_signature}&duration_seconds=8`,
+        { method: "POST" }
+      );
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        if (audioElementRef.current) {
+          audioElementRef.current.src = url;
+          await audioElementRef.current.play();
+          setMetronomeState(prev => ({ ...prev, isPlaying: true }));
+        }
+      }
+    } catch (e) {
+      console.error("Metronome error:", e);
+    }
+  }, [metronomeState.bpm, rhythmInfo]);
+  
+  const stopMetronome = useCallback(() => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      setMetronomeState(prev => ({ ...prev, isPlaying: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settings.metronomeEnabled && rhythmInfo) {
+      startMetronome();
+      return () => stopMetronome();
+    }
+    stopMetronome();
+  }, [settings.metronomeEnabled, rhythmInfo, startMetronome, stopMetronome]);
  
   const startMic = useCallback(async () => {
     try {
@@ -543,6 +681,21 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     setIsListening(false);
     setCurrentFreq(0); setCurrentNote(null); setCurrentMidi(null); setCents(0);
   }, []);
+  
+  // Monitor for wrong notes and rest alerts
+  useEffect(() => {
+    if (!isListening || !currentNote) return;
+
+    if (settings.stopAtWrongNote && scoreNoteNames.length > 0) {
+      const bareNote = currentNote.replace(/\d+$/, "");
+      if (!scoreNoteNames.includes(bareNote)) {
+        setIsAutoScrollPaused(true);
+        if (settings.loopOnWrongNote) {
+          setLoopMode("measure");
+        }
+      }
+    }
+  }, [isListening, currentNote, settings.stopAtWrongNote, settings.loopOnWrongNote, scoreNoteNames]);
  
   useEffect(() => {
     if (!isListening || !analyserRef.current) return;
@@ -558,6 +711,20 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         const entry = { freq, note: freqToNoteLabel(freq), time: Date.now() };
         noteHistoryRef.current = [...noteHistoryRef.current.slice(-49), entry];
         setNoteHistory([...noteHistoryRef.current]);
+
+        if (settings.restAlertEnabled && restAlerts.length > 0 && rhythmInfo) {
+          const currentMeasureEstimate = Math.max(1, Math.ceil(noteHistoryRef.current.length * (rhythmInfo.tempo_bpm || 120) / 60));
+          const upcomingRestMeasure = restAlerts.find(r => r.measure > currentMeasureEstimate && r.measure <= currentMeasureEstimate + settings.restAlertAdvance);
+          if (upcomingRestMeasure) {
+            setCurrentRestAlert({
+              measure: upcomingRestMeasure.measure,
+              beatsUntil: Math.max(0, upcomingRestMeasure.measure - currentMeasureEstimate),
+              isCritical: upcomingRestMeasure.measure - currentMeasureEstimate <= 1,
+            });
+          } else {
+            setCurrentRestAlert(null);
+          }
+        }
       } else {
         setCurrentFreq(0); setCurrentNote(null); setCents(0);
       }
@@ -565,17 +732,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isListening]);
+  }, [isListening, settings, restAlerts, rhythmInfo]);
  
   useEffect(() => {
     if (!autoScroll || !isListening || !scoreContainerRef.current) return;
     const id = setInterval(() => {
+      if (isAutoScrollPaused) {
+        return; // Don't scroll if paused
+      }
       if (currentFreq > 0) {
         scoreContainerRef.current.scrollTop += 0.4;
+      } else if (settings.pauseOnSilence) {
+        setIsAutoScrollPaused(true); // Pause on silence
       }
     }, 50);
     return () => clearInterval(id);
-  }, [autoScroll, isListening, currentFreq]);
+  }, [autoScroll, isListening, currentFreq, isAutoScrollPaused, settings.pauseOnSilence]);
  
   const tunerColor = Math.abs(cents) < 10 ? "#2aee6e" : Math.abs(cents) < 25 ? "#f5c542" : "#ee4444";
   const tunerOffset = Math.max(-50, Math.min(50, cents));
@@ -603,6 +775,16 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
             <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} style={{marginRight:6}}/>
             Auto-scroll
           </label>
+          {isAutoScrollPaused && (
+            <button style={{...styles.micBtn, background:"#2a5", border:"1px solid #4a9"}} onClick={() => setIsAutoScrollPaused(false)}>
+              ▶ Resume
+            </button>
+          )}
+          {loopMode !== "none" && (
+            <span style={{fontSize:11, color:"#C9A84C", padding:"4px 8px", background:"#2a2010", borderRadius:4}}>
+              🔄 {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
+            </span>
+          )}
           <div style={styles.userBadge} onClick={() => setShowProfile(p => !p)}>
             <div style={styles.avatar}>{user.name[0].toUpperCase()}</div>
             <span style={styles.userName}>{user.name}</span>
@@ -619,9 +801,43 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           <button style={{...styles.profileBtn, color:"#ee4444"}} onClick={onLogout}>Sign Out</button>
         </div>
       )}
+      
+      {/* Rest Alert Notification */}
+      {currentRestAlert && settings.restAlertEnabled && (
+        <div style={{...styles.alertBanner}}>
+          ⏰ Rest Alert: Measure {currentRestAlert.measure} in {currentRestAlert.beatsUntil.toFixed(1)} beat(s)
+        </div>
+      )}
+      
+      {/* Tempo Prompter */}
+      {tempoPrompt && rhythmInfo && (
+        <div style={styles.tempoPrompter}>
+          <div style={styles.tempoTitle}>Tempo: {metronomeState.bpm} BPM</div>
+          <div style={styles.tempoSubtitle}>{rhythmInfo.time_signature}</div>
+          <div style={{display:"flex", gap:8, marginTop:12, justifyContent:"center"}}>
+            <button style={styles.tempoBtn} onClick={startMetronome}>
+              {metronomeState.isPlaying ? "🔴 Stop" : "▶ Play Metronome"}
+            </button>
+            <button style={{...styles.tempoBtn, background:"#1e1a14"}} onClick={() => setTempoPrompt(false)}>
+              ✓ Ready
+            </button>
+          </div>
+        </div>
+      )}
  
       <div style={styles.mainBody}>
         <div style={styles.scorePanel} ref={scoreContainerRef}>
+          {/* Rest Alert Banner */}
+          {settings.restAlertEnabled && currentRestAlert && (
+            <div style={{...styles.restAlertBanner, background: currentRestAlert.isCritical ? "#8b2e2e" : "#3a3824"}}>
+              <div style={{fontSize:14, fontWeight:700, color: currentRestAlert.isCritical ? "#ff6b6b" : "#C9A84C"}}>
+                ⚠ REST ALERT - Measure {currentRestAlert.measure}
+              </div>
+              <div style={{fontSize:12, color: currentRestAlert.isCritical ? "#ffb3b3" : "#d4af9f", marginTop:4}}>
+                {currentRestAlert.isCritical ? "REST ENDS IN 1 BEAT" : `Rest in ${currentRestAlert.beatsUntil.toFixed(1)} beats`}
+              </div>
+            </div>
+          )}
           {!score ? (
             <div style={styles.scorePlaceholder}>
               <div style={styles.placeholderIcon}>𝄞</div>
@@ -677,7 +893,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           </div>
  
           <div style={styles.sidebarTabs}>
-            {["markings","info"].map(t => (
+            {["markings","info","training","settings"].map(t => (
               <button key={t} style={{...styles.sidebarTab, ...(sidebarTab===t ? styles.sidebarTabActive:{})}}
                 onClick={() => setSidebarTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>
             ))}
@@ -724,8 +940,148 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               </button>
             </div>
           )}
+ 
+          {sidebarTab === "training" && (
+            <div style={styles.markingsCard}>
+              <div style={{fontSize:12, color:"#a89060", marginBottom:8}}>
+                <strong>Training Mode</strong> - Generate synthesized playback for practice
+              </div>
+              {!score ? (
+                <div style={{fontSize:11, color:"#665040", padding:8, background:"#1a1610", borderRadius:4}}>
+                  Load a score to enable training mode.
+                </div>
+              ) : (
+                <>
+                  <div style={styles.settingRow}>
+                    <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                      <input type="checkbox" checked={trainingMode} onChange={e => setTrainingMode(e.target.checked)} style={{marginRight:0}}/>
+                      <span style={{fontSize:12, color:"#a89060"}}>Enable training mode</span>
+                    </label>
+                  </div>
+                  {trainingMode && rhythmInfo && (
+                    <>
+                      <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
+                        ♪ Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
+                        Notes: {rhythmInfo.note_count} | Rests: {rhythmInfo.rest_count}
+                      </div>
+                      <button style={{...styles.profileBtn, marginTop:8, width:"100%", background:"#C9A84C22", color:"#C9A84C"}} 
+                        onClick={async () => {
+                          if (!score || scoreType !== "musicxml") return;
+                          const form = new FormData();
+                          form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
+                          if (rhythmInfo?.tempo_bpm) {
+                            form.append("tempo_override", String(rhythmInfo.tempo_bpm));
+                          }
+                          try {
+                            const response = await fetch("/scores/training/synthesize", { method: "POST", body: form });
+                            if (response.ok) {
+                              const blob = await response.blob();
+                              const url = URL.createObjectURL(blob);
+                              if (audioElementRef.current) {
+                                audioElementRef.current.src = url;
+                                await audioElementRef.current.play();
+                              }
+                            } else {
+                              console.error("Training synth failed", await response.text());
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}>
+                        🎵 Generate Synthesizer Track
+                      </button>
+                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}} 
+                        onClick={async () => {
+                          if (!score || scoreType !== "musicxml") return;
+                          const form = new FormData();
+                          form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
+                          form.append("segment_size", "4");
+                          try {
+                            const response = await fetch("/scores/training/segments", { method: "POST", body: form });
+                            if (response.ok) {
+                              const payload = await response.json();
+                              setTrainingSegments(payload.segments || []);
+                            } else {
+                              console.error("Segment extraction failed", await response.text());
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}>
+                        📊 Break into Segments
+                      </button>
+                      {trainingSegments.length > 0 && (
+                        <div style={{marginTop:12, borderTop:"1px solid #2a2010", paddingTop:10}}>
+                          <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Practice segments</div>
+                          {trainingSegments.map(segment => (
+                            <div key={segment.segment_id} style={{fontSize:12, color:"#d8cfa3", marginBottom:6, padding:8, background:"#1a1610", borderRadius:6}}>
+                              <div>Segment {segment.segment_id}: measures {segment.start_measure}–{segment.end_measure}</div>
+                              <div style={{fontSize:11, color:"#8e7b55"}}>
+                                {segment.measure_count} measures • rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+ 
+          {sidebarTab === "settings" && (
+            <div style={styles.markingsCard}>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.stopAtWrongNote} onChange={e => setSettings({...settings, stopAtWrongNote: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Stop on wrong note</span>
+                </label>
+              </div>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.loopOnWrongNote} onChange={e => setSettings({...settings, loopOnWrongNote: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Loop on wrong note</span>
+                </label>
+              </div>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.metronomeEnabled} onChange={e => setSettings({...settings, metronomeEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Enable metronome</span>
+                </label>
+              </div>
+              {settings.metronomeEnabled && (
+                <div style={styles.settingRow}>
+                  <select value={settings.metronomeSource} onChange={e => setSettings({...settings, metronomeSource: e.target.value})} style={{fontSize:12, width:"100%", padding:"4px", background:"#1e1a14", border:"1px solid #3a2e1e", color:"#a89060", borderRadius:4}}>
+                    <option value="backend">Backend Metronome</option>
+                    <option value="client">Client Metronome</option>
+                  </select>
+                </div>
+              )}
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.restAlertEnabled} onChange={e => setSettings({...settings, restAlertEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Rest alerts</span>
+                </label>
+              </div>
+              {settings.restAlertEnabled && (
+                <div style={{...styles.settingRow, marginTop:4}}>
+                  <span style={{fontSize:11, color:"#665040"}}>Alert {settings.restAlertAdvance} beat(s) before</span>
+                  <input type="number" min="1" max="8" value={settings.restAlertAdvance} onChange={e => setSettings({...settings, restAlertAdvance: parseInt(e.target.value)})} style={{width:"40px", padding:"3px", marginLeft:"auto", background:"#1e1a14", border:"1px solid #3a2e1e", color:"#a89060", borderRadius:4}}/>
+                </div>
+              )}
+              {rhythmInfo && (
+                <button style={{...styles.profileBtn, marginTop:12, width:"100%", background:"#C9A84C22", color:"#C9A84C", border:"1px solid #C9A84C"}} onClick={() => setTempoPrompt(true)}>
+                  ♩ Start Tempo Prompt
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
+      
+      {/* Hidden audio element for metronome */}
+      <audio ref={audioElementRef} style={{display:"none"}}/>
     </div>
   );
 }
@@ -881,4 +1237,20 @@ const styles = {
   infoRow: { display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #1a1610" },
   infoLabel: { fontSize:12, color:"#665040" },
   infoVal: { fontSize:12, color:"#a89060", textAlign:"right", maxWidth:140 },
+  settingRow: { display:"flex", alignItems:"center", padding:"8px 0", borderBottom:"1px solid #1a1610", gap:8 },
+  alertBanner: {
+    background:"#d4a574", color:"#1a1200", padding:"12px 16px", textAlign:"center",
+    fontSize:13, fontWeight:700, position:"relative", zIndex:99,
+  },
+  tempoPrompter: {
+    position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)",
+    background:"#181410", border:"2px solid #C9A84C", borderRadius:12, padding:20,
+    textAlign:"center", zIndex:300, minWidth:240, boxShadow:"0 16px 48px rgba(0,0,0,0.8)",
+  },
+  tempoTitle: { fontSize:20, color:"#C9A84C", fontWeight:700, marginBottom:6 },
+  tempoSubtitle: { fontSize:14, color:"#a89060", marginBottom:12 },
+  tempoBtn: {
+    background:"#C9A84C", color:"#1a1200", border:"none", borderRadius:6,
+    padding:"8px 16px", fontSize:12, fontWeight:700, cursor:"pointer",
+  },
 };
