@@ -696,6 +696,10 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [wakeWordNotice, setWakeWordNotice] = useState(null);
   const [voiceRecognitionActive, setVoiceRecognitionActive] = useState(false);
   const [stickyNoteMode, setStickyNoteMode] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [loadingSynthesis, setLoadingSynthesis] = useState(false);
+  const [loadingMetronome, setLoadingMetronome] = useState(false);
+  const [numberOfSegments, setNumberOfSegments] = useState(4);
   const scoreContainerRef = useRef(null);
   const wakeCountdownTimerRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -839,7 +843,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   
   const startMetronome = useCallback(async () => {
     if (!rhythmInfo) return;
-
+    setLoadingMetronome(true);
     try {
       const response = await fetch(
         `/playback/metronome?bpm=${metronomeState.bpm}&time_signature=${rhythmInfo.time_signature}&duration_seconds=8`,
@@ -853,9 +857,14 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           await audioElementRef.current.play();
           setMetronomeState(prev => ({ ...prev, isPlaying: true }));
         }
+      } else {
+        const errorText = await response.text();
+        setErrorMessage(`Metronome error: ${errorText}`);
       }
     } catch (e) {
-      console.error("Metronome error:", e);
+      setErrorMessage(`Metronome failed: ${e.message}`);
+    } finally {
+      setLoadingMetronome(false);
     }
   }, [metronomeState.bpm, rhythmInfo]);
   
@@ -872,7 +881,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     
     const rect = scoreContainerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top + scoreContainerRef.current.scrollTop;
+    const y = event.clientY - rect.top;
     
     const newNote = {
       id: Date.now(),
@@ -880,7 +889,8 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       y: y,
       measure: currentMeasure,
       text: '',
-      color: '#FFFF88'
+      color: '#FFFF88',
+      editing: true
     };
     
     setStickyNotes(prev => [...prev, newNote]);
@@ -895,6 +905,27 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const deleteStickyNote = useCallback((id) => {
     setStickyNotes(prev => prev.filter(note => note.id !== id));
   }, []);
+
+  const beginWakeWordResume = useCallback((measureNumber) => {
+    const targetMeasure = Math.max(1, measureNumber - 1);
+    setWakeWordNotice({ measure: targetMeasure, countdown: 4 });
+    let count = 4;
+    const interval = rhythmInfo ? (60 / rhythmInfo.tempo_bpm) * 1000 : 1000; // based on tempo
+    const timer = setInterval(() => {
+      count--;
+      setWakeWordNotice(prev => prev ? { ...prev, countdown: count } : null);
+      if (count <= 0) {
+        clearInterval(timer);
+        setCurrentMeasure(targetMeasure);
+        setIsAutoScrollPaused(false);
+        if (scoreContainerRef.current) {
+          scoreContainerRef.current.scrollTop = (targetMeasure - 1) * 100;
+        }
+        setWakeWordNotice(null);
+      }
+    }, interval);
+    wakeCountdownTimerRef.current = timer;
+  }, [rhythmInfo]);
 
   useEffect(() => {
     if (settings.metronomeEnabled && rhythmInfo) {
@@ -1220,8 +1251,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    const newText = prompt('Edit sticky note:', note.text) || note.text;
-                    updateStickyNote(note.id, { text: newText });
+                    if (note.editing) {
+                      // Save on click outside or something, but for now, toggle
+                    } else {
+                      updateStickyNote(note.id, { editing: true });
+                    }
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -1230,7 +1264,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                     }
                   }}
                 >
-                  <div style={styles.stickyNoteText}>{note.text || 'Click to edit'}</div>
+                  {note.editing ? (
+                    <input
+                      style={styles.stickyNoteInput}
+                      value={note.text}
+                      onChange={(e) => updateStickyNote(note.id, { text: e.target.value })}
+                      onBlur={() => updateStickyNote(note.id, { editing: false })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          updateStickyNote(note.id, { editing: false });
+                        }
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <div style={styles.stickyNoteText}>{note.text || 'Click to edit'}</div>
+                  )}
                   <div style={styles.stickyNoteMeasure}>M{note.measure}</div>
                 </div>
               ))}
@@ -1380,8 +1429,10 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                         <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Playback Controls</div>
                         <div style={{display:"flex", gap:6, marginBottom:8}}>
                           <button style={{...styles.profileBtn, flex:1, fontSize:11}} 
+                            disabled={loadingSynthesis}
                             onClick={async () => {
                               if (!score || scoreType !== "musicxml") return;
+                              setLoadingSynthesis(true);
                               const form = new FormData();
                               form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
                               if (rhythmInfo?.tempo_bpm) {
@@ -1397,13 +1448,16 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                     await audioElementRef.current.play();
                                   }
                                 } else {
-                                  console.error("Training synth failed", await response.text());
+                                  const errorText = await response.text();
+                                  setErrorMessage(`Synthesis failed: ${errorText}`);
                                 }
                               } catch (err) {
-                                console.error(err);
+                                setErrorMessage(`Synthesis error: ${err.message}`);
+                              } finally {
+                                setLoadingSynthesis(false);
                               }
                             }}>
-                            🎵 Synth Track
+                            {loadingSynthesis ? "⏳ Synthesizing..." : "🎵 Synth Track"}
                           </button>
                           <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
                             onClick={() => {
@@ -1422,17 +1476,18 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                           if (!score || scoreType !== "musicxml") return;
                           const form = new FormData();
                           form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
-                          form.append("segment_size", "4");
+                          form.append("segment_size", String(numberOfSegments));
                           try {
                             const response = await fetch("/scores/training/segments", { method: "POST", body: form });
                             if (response.ok) {
                               const payload = await response.json();
                               setTrainingSegments(payload.segments || []);
                             } else {
-                              console.error("Segment extraction failed", await response.text());
+                              const errorText = await response.text();
+                              setErrorMessage(`Segment extraction failed: ${errorText}`);
                             }
                           } catch (err) {
-                            console.error(err);
+                            setErrorMessage(`Segment error: ${err.message}`);
                           }
                         }}>
                         📊 Extract Segments
@@ -1821,6 +1876,10 @@ const styles = {
   },
   stickyNoteText: {
     fontSize:11, color:"#1a1200", lineHeight:1.3, wordWrap:"break-word",
+  },
+  stickyNoteInput: {
+    fontSize:11, color:"#1a1200", lineHeight:1.3, wordWrap:"break-word",
+    background:"transparent", border:"none", outline:"none", width:"100%",
   },
   stickyNoteMeasure: {
     fontSize:9, color:"#665040", marginTop:4, textAlign:"right", fontWeight:700,
