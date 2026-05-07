@@ -294,7 +294,7 @@ function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings,
   return suggestions;
 }
 
-function startVoiceRecognition(onMeasureDetected) {
+function startVoiceRecognition(onMeasureDetected, onWakeWordDetected) {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     alert('Speech recognition not supported in this browser');
     return null;
@@ -311,17 +311,28 @@ function startVoiceRecognition(onMeasureDetected) {
     const last = event.results.length - 1;
     const transcript = event.results[last][0].transcript.toLowerCase().trim();
     
-    // Look for measure numbers (e.g., "measure 5", "go to measure 12", "measure twelve")
-    const measureMatch = transcript.match(/(?:measure|go to measure)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)/i);
-    
+    const numberMap = {
+      'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+      'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20
+    };
+
+    const numberMatcher = '(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
+    const wakeWordMatch = transcript.match(new RegExp(`${numberMatcher}\s+(?:resume|start|play|go)`, 'i'))
+      || transcript.match(new RegExp(`(?:resume|start|play|go)\s+${numberMatcher}`, 'i'));
+
+    if (wakeWordMatch) {
+      const numberWord = wakeWordMatch[1].toLowerCase();
+      const measureNumber = numberMap[numberWord] || parseInt(numberWord, 10);
+      if (measureNumber && measureNumber > 0) {
+        onWakeWordDetected(measureNumber);
+        return;
+      }
+    }
+
+    const measureMatch = transcript.match(new RegExp(`(?:measure|go to measure)\s+${numberMatcher}`, 'i'));
     if (measureMatch) {
       const numberWord = measureMatch[1].toLowerCase();
-      const numberMap = {
-        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20
-      };
-      
-      const measureNumber = numberMap[numberWord] || parseInt(numberWord);
+      const measureNumber = numberMap[numberWord] || parseInt(numberWord, 10);
       if (measureNumber && measureNumber > 0) {
         onMeasureDetected(measureNumber);
       }
@@ -682,9 +693,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [markingSuggestions, setMarkingSuggestions] = useState([]);
   const [stickyNotes, setStickyNotes] = useState([]);
   const [currentMeasure, setCurrentMeasure] = useState(1);
+  const [wakeWordNotice, setWakeWordNotice] = useState(null);
   const [voiceRecognitionActive, setVoiceRecognitionActive] = useState(false);
   const [stickyNoteMode, setStickyNoteMode] = useState(false);
   const scoreContainerRef = useRef(null);
+  const wakeCountdownTimerRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
@@ -897,16 +910,14 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     
     if (settings.voiceMeasureJumpEnabled && isListening) {
       recognition = startVoiceRecognition((measureNumber) => {
-        // Jump to measure and advance by 4 counts
         const targetMeasure = Math.max(1, measureNumber + 4);
         setCurrentMeasure(targetMeasure);
         setIsAutoScrollPaused(false);
-        
-        // Scroll to approximate position
         if (scoreContainerRef.current) {
-          const scrollAmount = (targetMeasure - 1) * 100; // Rough estimate
-          scoreContainerRef.current.scrollTop = scrollAmount;
+          scoreContainerRef.current.scrollTop = (targetMeasure - 1) * 100;
         }
+      }, (measureNumber) => {
+        beginWakeWordResume(measureNumber);
       });
       setVoiceRecognitionActive(true);
     } else {
@@ -921,7 +932,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         recognition.stop();
       }
     };
-  }, [settings.voiceMeasureJumpEnabled, isListening]);
+  }, [settings.voiceMeasureJumpEnabled, isListening, beginWakeWordResume]);
 
   // Update metronome BPM when rhythm info changes
   useEffect(() => {
