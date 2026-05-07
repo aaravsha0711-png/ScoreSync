@@ -157,7 +157,88 @@ function extractRestAlerts(mxmlText) {
   return restAlerts;
 }
 
-function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings) {
+function computeRMS(buffer) {
+  let sum = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    sum += buffer[i] * buffer[i];
+  }
+  return buffer.length > 0 ? Math.sqrt(sum / buffer.length) : 0;
+}
+
+function computeSpectralCentroid(magnitudeData, sampleRate) {
+  let weightedSum = 0;
+  let total = 0;
+  for (let i = 0; i < magnitudeData.length; i += 1) {
+    const magnitude = Math.max(0, magnitudeData[i]);
+    const frequency = (i * sampleRate) / (2 * magnitudeData.length);
+    weightedSum += frequency * magnitude;
+    total += magnitude;
+  }
+  return total > 0 ? weightedSum / total : 0;
+}
+
+function computeSpectralFlatness(magnitudeData) {
+  let geo = 1;
+  let arith = 0;
+  if (!magnitudeData || magnitudeData.length === 0) return 0;
+  for (let i = 0; i < magnitudeData.length; i += 1) {
+    const value = Math.max(1e-12, magnitudeData[i]);
+    geo *= value;
+    arith += value;
+  }
+  geo = Math.pow(geo, 1 / magnitudeData.length);
+  return geo / (arith / magnitudeData.length);
+}
+
+function detectVibratoFromHistory(freqHistory, sampleRate) {
+  if (!freqHistory || freqHistory.length < 8) return { rate: 0, depth: 0, hasVibrato: false };
+  const variation = freqHistory.filter(f => f > 0);
+  if (variation.length < 5) return { rate: 0, depth: 0, hasVibrato: false };
+  const avg = variation.reduce((sum, f) => sum + f, 0) / variation.length;
+  const cents = variation.map(f => 1200 * Math.log2(f / Math.max(avg, 1e-6)));
+  const variance = cents.reduce((sum, c) => sum + c * c, 0) / cents.length;
+  const std = Math.sqrt(variance);
+  let crossings = 0;
+  for (let i = 2; i < variation.length; i += 1) {
+    const prevDiff = variation[i - 1] - variation[i - 2];
+    const currDiff = variation[i] - variation[i - 1];
+    if (prevDiff * currDiff < 0) crossings += 1;
+  }
+  const durationSeconds = Math.max(0.001, (variation.length * 512) / sampleRate);
+  const rate = crossings / durationSeconds / 2;
+  const hasVibrato = rate >= 4 && rate <= 8 && std >= 15;
+  return { rate, depth: std, hasVibrato };
+}
+
+function inferPerformanceArticulation(metrics, complexMarkings, currentMeasure) {
+  const expected = complexMarkings
+    .filter(m => m.measure === currentMeasure && m.type === "articulation")
+    .map(m => m.detail);
+  const suggestions = [];
+  if (!metrics) return suggestions;
+
+  if (expected.includes("staccato") && metrics.noteCharacter === "legato") {
+    suggestions.push({ suggestion: "The score marks staccato here, but your tone sounds connected. Shorten the note release." });
+  }
+  if (expected.includes("tenuto") && metrics.noteCharacter === "staccato") {
+    suggestions.push({ suggestion: "This passage should feel held. Release less quickly for tenuto." });
+  }
+  if (expected.includes("accent") && metrics.noteCharacter === "plain") {
+    suggestions.push({ suggestion: "Accent markings are present but your attack is soft. Emphasize the onset." });
+  }
+  if (!expected.length && metrics.noteCharacter === "accent") {
+    suggestions.push({ suggestion: "Your strong attack suggests an accent. Consider adding an accent mark if it fits the phrase." });
+  }
+  if (metrics.hasVibrato && expected.includes("legato")) {
+    suggestions.push({ suggestion: "Your sustained note has a gentle vibrato; keep it consistent and expressive." });
+  }
+  if (!expected.includes("staccato") && metrics.noteCharacter === "staccato") {
+    suggestions.push({ suggestion: "Your phrasing is short and detached. If the score is not marked, match the style carefully." });
+  }
+  return suggestions;
+}
+
+function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings, metrics) {
   const suggestions = [];
   
   // Check for dynamic markings
@@ -189,7 +270,27 @@ function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings)
       measure: currentMeasure
     });
   }
-  
+
+  if (metrics) {
+    const perfSuggestions = inferPerformanceArticulation(metrics, complexMarkings, currentMeasure);
+    perfSuggestions.forEach(s => suggestions.push({ type: "performance", ...s, measure: currentMeasure }));
+
+    if (!hasDynamics && metrics.rmsLevel > 0.15) {
+      suggestions.push({
+        type: "dynamics",
+        suggestion: "Your playing already shows volume contrast. Mark dynamics in the score for clarity.",
+        measure: currentMeasure
+      });
+    }
+    if (metrics.hasVibrato && !metrics.noteCharacter) {
+      suggestions.push({
+        type: "vibrato",
+        suggestion: "Detected a pitch oscillation consistent with vibrato; shape it to match phrase context.",
+        measure: currentMeasure
+      });
+    }
+  }
+
   return suggestions;
 }
 
@@ -592,7 +693,19 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const osmdRef = useRef(null);
   const osmdContainerRef = useRef(null);
   const noteHistoryRef = useRef([]);
+  const freqHistoryRef = useRef([]);
+  const lastRmsRef = useRef(0);
+  const noteStableSinceRef = useRef(null);
+  const previousNoteRef = useRef(null);
+  const frameCounterRef = useRef(0);
   const [noteHistory, setNoteHistory] = useState([]);
+  const [rmsLevel, setRmsLevel] = useState(0);
+  const [spectralCentroid, setSpectralCentroid] = useState(0);
+  const [spectralFlatness, setSpectralFlatness] = useState(0);
+  const [attackMs, setAttackMs] = useState(0);
+  const [releaseMs, setReleaseMs] = useState(0);
+  const [vibratoStrength, setVibratoStrength] = useState(0);
+  const [performanceArticulation, setPerformanceArticulation] = useState("");
   const [settings, setSettings] = useState({
     stopAtWrongNote: true,
     loopOnWrongNote: false,
@@ -603,6 +716,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     markingSuggestionsEnabled: true,
     stickyNotesEnabled: true,
     voiceMeasureJumpEnabled: true,
+    liveAnalysisEnabled: true,
   });
   
   const [metronomeState, setMetronomeState] = useState({
@@ -819,12 +933,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   // Generate marking suggestions based on current measure
   useEffect(() => {
     if (settings.markingSuggestionsEnabled && rhythmInfo && complexMarkings.length > 0) {
-      const suggestions = generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings);
+      const metrics = settings.liveAnalysisEnabled ? {
+        rmsLevel,
+        spectralCentroid,
+        spectralFlatness,
+        attackMs,
+        releaseMs,
+        hasVibrato: vibratoStrength > 0.4,
+        vibratoStrength,
+        noteCharacter: performanceArticulation,
+      } : null;
+      const suggestions = generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings, metrics);
       setMarkingSuggestions(suggestions);
     } else {
       setMarkingSuggestions([]);
     }
-  }, [currentMeasure, settings.markingSuggestionsEnabled, rhythmInfo, complexMarkings]);
+  }, [currentMeasure, settings.markingSuggestionsEnabled, settings.liveAnalysisEnabled, rhythmInfo, complexMarkings, rmsLevel, spectralCentroid, spectralFlatness, attackMs, releaseMs, vibratoStrength, performanceArticulation]);
  
   const startMic = useCallback(async () => {
     try {
@@ -868,16 +992,52 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     if (!isListening || !analyserRef.current) return;
     const loop = () => {
       analyserRef.current.getFloatTimeDomainData(bufRef.current);
+      const currentRms = computeRMS(bufRef.current);
+      setRmsLevel(currentRms);
+
       const freq = yin(bufRef.current, audioCtxRef.current.sampleRate);
+      const now = Date.now();
       if (freq > 40 && freq < 4200) {
         setCurrentFreq(freq);
         const midi = freqToMidi(freq);
         setCurrentMidi(midi);
-        setCurrentNote(freqToNoteLabel(freq));
+        const noteLabel = freqToNoteLabel(freq);
+        setCurrentNote(noteLabel);
         setCents(centsDiff(freq, midi));
-        const entry = { freq, note: freqToNoteLabel(freq), time: Date.now() };
+        const entry = { freq, note: noteLabel, time: now };
         noteHistoryRef.current = [...noteHistoryRef.current.slice(-49), entry];
         setNoteHistory([...noteHistoryRef.current]);
+
+        if (previousNoteRef.current !== noteLabel) {
+          noteStableSinceRef.current = now;
+          previousNoteRef.current = noteLabel;
+        }
+        const sustainMs = noteStableSinceRef.current ? now - noteStableSinceRef.current : 0;
+
+        const freqHistory = [...freqHistoryRef.current.slice(-49), freq];
+        freqHistoryRef.current = freqHistory;
+        const vibrato = detectVibratoFromHistory(freqHistory, audioCtxRef.current.sampleRate);
+        setVibratoStrength(vibrato.rate || 0);
+
+        const spectrum = new Float32Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getFloatFrequencyData(spectrum);
+        const centroid = computeSpectralCentroid(spectrum, audioCtxRef.current.sampleRate);
+        setSpectralCentroid(centroid);
+        setSpectralFlatness(computeSpectralFlatness(spectrum));
+
+        const attackDelta = currentRms - lastRmsRef.current;
+        const attackTime = attackDelta > 0.05 ? 30 : 120;
+        setAttackMs(attackTime);
+        const releaseTime = attackDelta < -0.05 ? 80 : 180;
+        setReleaseMs(releaseTime);
+        lastRmsRef.current = currentRms;
+
+        let noteCharacter = "plain";
+        if (attackTime < 50 && releaseTime < 120) noteCharacter = "staccato";
+        else if (sustainMs > 400 && currentRms > 0.02) noteCharacter = "legato";
+        else if (currentRms > 0.15 && attackDelta > 0.08) noteCharacter = "accent";
+        else if (sustainMs > 600) noteCharacter = "tenuto";
+        setPerformanceArticulation(noteCharacter);
 
         if (settings.restAlertEnabled && restAlerts.length > 0 && rhythmInfo) {
           const currentMeasureEstimate = Math.max(1, Math.ceil(noteHistoryRef.current.length * (rhythmInfo.tempo_bpm || 120) / 60));
@@ -1027,6 +1187,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   • {suggestion.suggestion}
                 </div>
               ))}
+              {performanceArticulation && (
+                <div style={{fontSize:11, color:"#b9a46a", marginTop:6}}>
+                  Live analysis: {performanceArticulation} character detected
+                </div>
+              )}
             </div>
           )}
 
@@ -1440,6 +1605,12 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                 <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
                   <input type="checkbox" checked={settings.voiceMeasureJumpEnabled} onChange={e => setSettings({...settings, voiceMeasureJumpEnabled: e.target.checked})} style={{marginRight:0}}/>
                   <span style={{fontSize:12, color:"#a89060"}}>Voice measure jumping</span>
+                </label>
+              </div>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.liveAnalysisEnabled} onChange={e => setSettings({...settings, liveAnalysisEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Live performance analysis</span>
                 </label>
               </div>
               {rhythmInfo && (

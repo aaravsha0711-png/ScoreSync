@@ -23,7 +23,7 @@ from fastapi.responses import Response
 
 from core.deps import get_current_user
 from core.transposition import transpose_musicxml, semitones_for
-from analysis.stylistic import analyze_musicxml
+from stylistic import analyze_musicxml, analyze_audio_performance, load_audio_bytes
 from analysis.musescore_converter import (
     convert_to_musicxml,
     convert_to_pdf,
@@ -133,6 +133,35 @@ async def analyze_score(
 
     report = analyze_musicxml(data)
     return report.to_dict()
+
+
+@router.post("/analyze/audio")
+async def analyze_audio_performance_route(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Accept an audio file and return performance analysis from Librosa.
+    Supports WAV/MP3/FLAC/OGG/M4A input. The backend extracts dynamics,
+    vibrato, and attack/release characteristics.
+    """
+    data = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+    supported = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+    if ext not in supported:
+        raise HTTPException(
+            status_code=422,
+            detail="Audio analysis requires WAV, MP3, FLAC, OGG, M4A, or AAC audio file.",
+        )
+
+    try:
+        audio, sr = load_audio_bytes(data)
+        report = analyze_audio_performance(audio, sr)
+        return report
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audio analysis failed: {str(e)}")
 
 
 @router.post("/transpose")

@@ -8,8 +8,16 @@ same ideas for accept/deny coaching suggestions.
 
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass, asdict
+
+try:
+    import librosa
+    import numpy as np
+except ImportError:
+    librosa = None
+    np = None
 
 
 @dataclass
@@ -79,6 +87,100 @@ def _decode(data: bytes) -> str:
 
 def _strip_xml(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "").strip()
+
+
+def _safe_librosa_available() -> bool:
+    return librosa is not None and np is not None
+
+
+def _classify_dynamics(rms: np.ndarray) -> dict:
+    if rms is None or len(rms) == 0:
+        return {"level": "unknown", "avg_db": None, "range_db": None}
+    db = 20 * np.log10(np.maximum(rms, 1e-10))
+    avg_db = float(np.mean(db))
+    dynamic_range = float(np.ptp(db))
+    if avg_db < -40:
+        level = "ppp"
+    elif avg_db < -30:
+        level = "pp"
+    elif avg_db < -20:
+        level = "p"
+    elif avg_db < -10:
+        level = "mp"
+    elif avg_db < 0:
+        level = "mf"
+    elif avg_db < 10:
+        level = "f"
+    elif avg_db < 16:
+        level = "ff"
+    else:
+        level = "fff"
+    return {"level": level, "avg_db": avg_db, "range_db": dynamic_range}
+
+
+def detect_dynamics(audio: np.ndarray, sr: int) -> dict:
+    if not _safe_librosa_available():
+        raise RuntimeError("Librosa is not installed")
+    S = librosa.feature.melspectrogram(y=audio, sr=sr)
+    rms = librosa.feature.rms(S=S)[0]
+    return _classify_dynamics(rms)
+
+
+def detect_vibrato(audio: np.ndarray, sr: int, hop_length: int = 512, win_length: int = 2048) -> dict:
+    if not _safe_librosa_available():
+        raise RuntimeError("Librosa is not installed")
+    f0 = librosa.yin(audio, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"), sr=sr, frame_length=win_length, hop_length=hop_length)
+    valid = f0[np.isfinite(f0)]
+    if len(valid) < 5:
+        return {"vibrato_rate_hz": 0.0, "vibrato_depth_cents": 0.0, "has_vibrato": False}
+    median_freq = float(np.median(valid))
+    cents = 1200 * np.log2(valid / median_freq)
+    depth = float(np.std(cents))
+    derivative = np.diff(valid)
+    if len(derivative) < 2:
+        return {"vibrato_rate_hz": 0.0, "vibrato_depth_cents": depth, "has_vibrato": False}
+    zero_crossings = int(np.sum(np.diff(np.sign(derivative)) != 0))
+    duration_sec = float(len(valid) * hop_length / sr)
+    rate = float(zero_crossings / max(duration_sec, 1e-6) / 2.0)
+    has_vibrato = 4.0 <= rate <= 8.0 and depth >= 20.0
+    return {"vibrato_rate_hz": rate, "vibrato_depth_cents": depth, "has_vibrato": has_vibrato}
+
+
+def detect_attack_release(audio: np.ndarray, sr: int, hop_length: int = 512, win_length: int = 2048) -> dict:
+    if not _safe_librosa_available():
+        raise RuntimeError("Librosa is not installed")
+    rms = librosa.feature.rms(y=audio, frame_length=win_length, hop_length=hop_length)[0]
+    if len(rms) < 2:
+        return {"attack_ms": None, "release_ms": None, "shape": "unknown"}
+    peak = float(np.max(rms))
+    if peak <= 0:
+        return {"attack_ms": None, "release_ms": None, "shape": "silent"}
+    threshold_low = peak * 0.1
+    threshold_high = peak * 0.9
+    attack_start = int(np.argmax(rms > threshold_low))
+    attack_end = int(np.argmax(rms > threshold_high))
+    attack_ms = float(abs(attack_end - attack_start) * hop_length / sr * 1000)
+    release_start = int(len(rms) - 1 - np.argmax(rms[::-1] > threshold_low))
+    release_ms = float(abs((len(rms) - 1) - release_start) * hop_length / sr * 1000)
+    shape = "sustained" if attack_ms > 70 and release_ms > 120 else "short" if attack_ms < 50 else "moderate"
+    return {"attack_ms": attack_ms, "release_ms": release_ms, "shape": shape}
+
+
+def load_audio_bytes(data: bytes, sr: int | None = None) -> tuple[np.ndarray, int]:
+    if not _safe_librosa_available():
+        raise RuntimeError("Librosa is not installed")
+    audio, sample_rate = librosa.load(io.BytesIO(data), sr=sr, mono=True)
+    return audio, sample_rate
+
+
+def analyze_audio_performance(audio: np.ndarray, sr: int) -> dict:
+    if not _safe_librosa_available():
+        raise RuntimeError("Librosa is not installed")
+    return {
+        "dynamics": detect_dynamics(audio, sr),
+        "vibrato": detect_vibrato(audio, sr),
+        "attack_release": detect_attack_release(audio, sr),
+    }
 
 
 def _extract_time_signatures(text: str) -> str:
