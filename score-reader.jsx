@@ -156,6 +156,84 @@ function extractRestAlerts(mxmlText) {
   }
   return restAlerts;
 }
+
+function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings) {
+  const suggestions = [];
+  
+  // Check for dynamic markings
+  const hasDynamics = complexMarkings.some(m => m.type === "dynamics");
+  if (!hasDynamics && currentMeasure % 4 === 1) {
+    suggestions.push({
+      type: "dynamics",
+      suggestion: "Consider adding dynamic markings (p, f, mf) to indicate volume changes",
+      measure: currentMeasure
+    });
+  }
+  
+  // Check for articulation
+  const hasArticulation = complexMarkings.some(m => m.type === "articulation" && Math.abs(m.measure - currentMeasure) <= 2);
+  if (!hasArticulation && currentMeasure % 2 === 0) {
+    suggestions.push({
+      type: "articulation", 
+      suggestion: "Add staccato or legato markings to clarify note connection",
+      measure: currentMeasure
+    });
+  }
+  
+  // Check for tempo changes
+  const hasTempoChange = complexMarkings.some(m => m.type === "tempo");
+  if (!hasTempoChange && currentMeasure > 8 && currentMeasure % 8 === 0) {
+    suggestions.push({
+      type: "tempo",
+      suggestion: "Consider a ritardando or accelerando to add musical expression",
+      measure: currentMeasure
+    });
+  }
+  
+  return suggestions;
+}
+
+function startVoiceRecognition(onMeasureDetected) {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert('Speech recognition not supported in this browser');
+    return null;
+  }
+  
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognition();
+  
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+  
+  recognition.onresult = (event) => {
+    const last = event.results.length - 1;
+    const transcript = event.results[last][0].transcript.toLowerCase().trim();
+    
+    // Look for measure numbers (e.g., "measure 5", "go to measure 12", "measure twelve")
+    const measureMatch = transcript.match(/(?:measure|go to measure)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)/i);
+    
+    if (measureMatch) {
+      const numberWord = measureMatch[1].toLowerCase();
+      const numberMap = {
+        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20
+      };
+      
+      const measureNumber = numberMap[numberWord] || parseInt(numberWord);
+      if (measureNumber && measureNumber > 0) {
+        onMeasureDetected(measureNumber);
+      }
+    }
+  };
+  
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+  };
+  
+  recognition.start();
+  return recognition;
+}
  
 // ─── Mock DB (localStorage) ───────────────────────────────────────────────────
  
@@ -500,6 +578,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [loopMode, setLoopMode] = useState("none");
   const [osmdLoaded, setOsmdLoaded] = useState(false);
   const [osmdError, setOsmdError] = useState(null);
+  const [markingSuggestions, setMarkingSuggestions] = useState([]);
+  const [stickyNotes, setStickyNotes] = useState([]);
+  const [currentMeasure, setCurrentMeasure] = useState(1);
+  const [voiceRecognitionActive, setVoiceRecognitionActive] = useState(false);
+  const [stickyNoteMode, setStickyNoteMode] = useState(false);
   const scoreContainerRef = useRef(null);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
@@ -516,14 +599,19 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     metronomeSource: "backend", // "backend" or "client"
     metronomeEnabled: false,
     restAlertEnabled: true,
-    restAlertAdvance: 2, // 2 beats before rest
-    pauseOnSilence: true,
+    restAlertAdvance: 1,
+    markingSuggestionsEnabled: true,
+    stickyNotesEnabled: true,
+    voiceMeasureJumpEnabled: true,
   });
   
   const [metronomeState, setMetronomeState] = useState({
     isPlaying: false,
-    bpm: rhythmInfo?.tempo_bpm || 120,
+    bpm: 120,
+    intervalId: null,
   });
+  
+  const metronomeActive = metronomeState.isPlaying;
   
   const audioElementRef = useRef(null);
  
@@ -647,8 +735,38 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const stopMetronome = useCallback(() => {
     if (audioElementRef.current) {
       audioElementRef.current.pause();
-      setMetronomeState(prev => ({ ...prev, isPlaying: false }));
+      audioElementRef.current.currentTime = 0;
     }
+    setMetronomeState(prev => ({ ...prev, isPlaying: false }));
+  }, []);
+  
+  const handleStickyNoteClick = useCallback((event) => {
+    if (!stickyNoteMode || !scoreContainerRef.current) return;
+    
+    const rect = scoreContainerRef.current.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top + scoreContainerRef.current.scrollTop;
+    
+    const newNote = {
+      id: Date.now(),
+      x: x,
+      y: y,
+      measure: currentMeasure,
+      text: '',
+      color: '#FFFF88'
+    };
+    
+    setStickyNotes(prev => [...prev, newNote]);
+  }, [stickyNoteMode, currentMeasure]);
+
+  const updateStickyNote = useCallback((id, updates) => {
+    setStickyNotes(prev => prev.map(note => 
+      note.id === id ? { ...note, ...updates } : note
+    ));
+  }, []);
+
+  const deleteStickyNote = useCallback((id) => {
+    setStickyNotes(prev => prev.filter(note => note.id !== id));
   }, []);
 
   useEffect(() => {
@@ -658,6 +776,55 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     }
     stopMetronome();
   }, [settings.metronomeEnabled, rhythmInfo, startMetronome, stopMetronome]);
+
+  // Voice recognition for measure jumping
+  useEffect(() => {
+    let recognition = null;
+    
+    if (settings.voiceMeasureJumpEnabled && isListening) {
+      recognition = startVoiceRecognition((measureNumber) => {
+        // Jump to measure and advance by 4 counts
+        const targetMeasure = Math.max(1, measureNumber + 4);
+        setCurrentMeasure(targetMeasure);
+        setIsAutoScrollPaused(false);
+        
+        // Scroll to approximate position
+        if (scoreContainerRef.current) {
+          const scrollAmount = (targetMeasure - 1) * 100; // Rough estimate
+          scoreContainerRef.current.scrollTop = scrollAmount;
+        }
+      });
+      setVoiceRecognitionActive(true);
+    } else {
+      if (recognition) {
+        recognition.stop();
+      }
+      setVoiceRecognitionActive(false);
+    }
+    
+    return () => {
+      if (recognition) {
+        recognition.stop();
+      }
+    };
+  }, [settings.voiceMeasureJumpEnabled, isListening]);
+
+  // Update metronome BPM when rhythm info changes
+  useEffect(() => {
+    if (rhythmInfo?.tempo_bpm) {
+      setMetronomeState(prev => ({ ...prev, bpm: rhythmInfo.tempo_bpm }));
+    }
+  }, [rhythmInfo]);
+
+  // Generate marking suggestions based on current measure
+  useEffect(() => {
+    if (settings.markingSuggestionsEnabled && rhythmInfo && complexMarkings.length > 0) {
+      const suggestions = generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings);
+      setMarkingSuggestions(suggestions);
+    } else {
+      setMarkingSuggestions([]);
+    }
+  }, [currentMeasure, settings.markingSuggestionsEnabled, rhythmInfo, complexMarkings]);
  
   const startMic = useCallback(async () => {
     try {
@@ -714,6 +881,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
 
         if (settings.restAlertEnabled && restAlerts.length > 0 && rhythmInfo) {
           const currentMeasureEstimate = Math.max(1, Math.ceil(noteHistoryRef.current.length * (rhythmInfo.tempo_bpm || 120) / 60));
+          setCurrentMeasure(currentMeasureEstimate);
           const upcomingRestMeasure = restAlerts.find(r => r.measure > currentMeasureEstimate && r.measure <= currentMeasureEstimate + settings.restAlertAdvance);
           if (upcomingRestMeasure) {
             setCurrentRestAlert({
@@ -785,6 +953,15 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               🔄 {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
             </span>
           )}
+          <button style={{...styles.micBtn, ...(stickyNoteMode ? {background:"#C9A84C", color:"#1a1200"} : {})}}
+            onClick={() => setStickyNoteMode(!stickyNoteMode)}>
+            📌 {stickyNoteMode ? "Exit Notes" : "Sticky Notes"}
+          </button>
+          {voiceRecognitionActive && (
+            <span style={{fontSize:11, color:"#2aee6e", padding:"4px 8px", background:"#1a2a1a", borderRadius:4}}>
+              🎤 Voice Active
+            </span>
+          )}
           <div style={styles.userBadge} onClick={() => setShowProfile(p => !p)}>
             <div style={styles.avatar}>{user.name[0].toUpperCase()}</div>
             <span style={styles.userName}>{user.name}</span>
@@ -835,6 +1012,63 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               </div>
               <div style={{fontSize:12, color: currentRestAlert.isCritical ? "#ffb3b3" : "#d4af9f", marginTop:4}}>
                 {currentRestAlert.isCritical ? "REST ENDS IN 1 BEAT" : `Rest in ${currentRestAlert.beatsUntil.toFixed(1)} beats`}
+              </div>
+            </div>
+          )}
+
+          {/* Marking Suggestions */}
+          {settings.markingSuggestionsEnabled && markingSuggestions.length > 0 && (
+            <div style={styles.markingSuggestionsBanner}>
+              <div style={{fontSize:14, fontWeight:700, color:"#C9A84C", marginBottom:4}}>
+                💡 Performance Enhancement Suggestions
+              </div>
+              {markingSuggestions.slice(0,2).map((suggestion, i) => (
+                <div key={i} style={{fontSize:12, color:"#d4af9f", marginBottom:2}}>
+                  • {suggestion.suggestion}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sticky Notes Overlay */}
+          {settings.stickyNotesEnabled && stickyNotes.length > 0 && (
+            <div style={styles.stickyNotesOverlay}>
+              {stickyNotes.map(note => (
+                <div
+                  key={note.id}
+                  style={{
+                    ...styles.stickyNote,
+                    left: note.x,
+                    top: note.y,
+                    backgroundColor: note.color
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const newText = prompt('Edit sticky note:', note.text) || note.text;
+                    updateStickyNote(note.id, { text: newText });
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (confirm('Delete this sticky note?')) {
+                      deleteStickyNote(note.id);
+                    }
+                  }}
+                >
+                  <div style={styles.stickyNoteText}>{note.text || 'Click to edit'}</div>
+                  <div style={styles.stickyNoteMeasure}>M{note.measure}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sticky Note Mode Click Handler */}
+          {stickyNoteMode && (
+            <div
+              style={styles.stickyNoteModeOverlay}
+              onClick={handleStickyNoteClick}
+            >
+              <div style={styles.stickyNoteModeHint}>
+                📌 Click anywhere on the score to add a sticky note
               </div>
             </div>
           )}
@@ -893,7 +1127,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           </div>
  
           <div style={styles.sidebarTabs}>
-            {["markings","info","training","settings"].map(t => (
+            {["markings","info","training","metronome","settings"].map(t => (
               <button key={t} style={{...styles.sidebarTab, ...(sidebarTab===t ? styles.sidebarTabActive:{})}}
                 onClick={() => setSidebarTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>
             ))}
@@ -944,7 +1178,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           {sidebarTab === "training" && (
             <div style={styles.markingsCard}>
               <div style={{fontSize:12, color:"#a89060", marginBottom:8}}>
-                <strong>Training Mode</strong> - Generate synthesized playback for practice
+                <strong>Training Mode</strong> - Practice with synthesized playback and segment control
               </div>
               {!score ? (
                 <div style={{fontSize:11, color:"#665040", padding:8, background:"#1a1610", borderRadius:4}}>
@@ -962,34 +1196,51 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                     <>
                       <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
                         ♪ Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
-                        Notes: {rhythmInfo.note_count} | Rests: {rhythmInfo.rest_count}
+                        Notes: {rhythmInfo.note_count} | Rests: {rhythmInfo.rest_count}<br/>
+                        Current Measure: {currentMeasure}
                       </div>
-                      <button style={{...styles.profileBtn, marginTop:8, width:"100%", background:"#C9A84C22", color:"#C9A84C"}} 
-                        onClick={async () => {
-                          if (!score || scoreType !== "musicxml") return;
-                          const form = new FormData();
-                          form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
-                          if (rhythmInfo?.tempo_bpm) {
-                            form.append("tempo_override", String(rhythmInfo.tempo_bpm));
-                          }
-                          try {
-                            const response = await fetch("/scores/training/synthesize", { method: "POST", body: form });
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const url = URL.createObjectURL(blob);
-                              if (audioElementRef.current) {
-                                audioElementRef.current.src = url;
-                                await audioElementRef.current.play();
+                      
+                      <div style={{marginTop:12, marginBottom:8}}>
+                        <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Playback Controls</div>
+                        <div style={{display:"flex", gap:6, marginBottom:8}}>
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11}} 
+                            onClick={async () => {
+                              if (!score || scoreType !== "musicxml") return;
+                              const form = new FormData();
+                              form.append("file", new Blob([score], { type: "application/xml" }), "score.xml");
+                              if (rhythmInfo?.tempo_bpm) {
+                                form.append("tempo_override", String(rhythmInfo.tempo_bpm));
                               }
-                            } else {
-                              console.error("Training synth failed", await response.text());
-                            }
-                          } catch (err) {
-                            console.error(err);
-                          }
-                        }}>
-                        🎵 Generate Synthesizer Track
-                      </button>
+                              try {
+                                const response = await fetch("/scores/training/synthesize", { method: "POST", body: form });
+                                if (response.ok) {
+                                  const blob = await response.blob();
+                                  const url = URL.createObjectURL(blob);
+                                  if (audioElementRef.current) {
+                                    audioElementRef.current.src = url;
+                                    await audioElementRef.current.play();
+                                  }
+                                } else {
+                                  console.error("Training synth failed", await response.text());
+                                }
+                              } catch (err) {
+                                console.error(err);
+                              }
+                            }}>
+                            🎵 Synth Track
+                          </button>
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
+                            onClick={() => {
+                              if (audioElementRef.current) {
+                                audioElementRef.current.pause();
+                                audioElementRef.current.currentTime = 0;
+                              }
+                            }}>
+                            ⏹ Stop
+                          </button>
+                        </div>
+                      </div>
+                      
                       <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}} 
                         onClick={async () => {
                           if (!score || scoreType !== "musicxml") return;
@@ -1008,28 +1259,131 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                             console.error(err);
                           }
                         }}>
-                        📊 Break into Segments
+                        📊 Extract Segments
                       </button>
+                      
                       {trainingSegments.length > 0 && (
                         <div style={{marginTop:12, borderTop:"1px solid #2a2010", paddingTop:10}}>
-                          <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Practice segments</div>
-                          {trainingSegments.map(segment => (
-                            <div key={segment.segment_id} style={{fontSize:12, color:"#d8cfa3", marginBottom:6, padding:8, background:"#1a1610", borderRadius:6}}>
-                              <div>Segment {segment.segment_id}: measures {segment.start_measure}–{segment.end_measure}</div>
-                              <div style={{fontSize:11, color:"#8e7b55"}}>
-                                {segment.measure_count} measures • rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
+                          <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Practice Segments ({trainingSegments.length})</div>
+                          <div style={{maxHeight:200, overflow:"auto"}}>
+                            {trainingSegments.map(segment => (
+                              <div key={segment.segment_id} style={{fontSize:12, color:"#d8cfa3", marginBottom:6, padding:8, background:"#1a1610", borderRadius:6, cursor:"pointer"}}
+                                onClick={() => {
+                                  // Jump to segment start
+                                  setCurrentMeasure(segment.start_measure);
+                                  if (scoreContainerRef.current) {
+                                    const scrollAmount = (segment.start_measure - 1) * 120; // Rough estimate
+                                    scoreContainerRef.current.scrollTop = scrollAmount;
+                                  }
+                                }}>
+                                <div style={{fontWeight:700}}>Segment {segment.segment_id}: M{segment.start_measure}–{segment.end_measure}</div>
+                                <div style={{fontSize:11, color:"#8e7b55", marginTop:2}}>
+                                  {segment.measure_count} measures • rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       )}
+                      
+                      <div style={{marginTop:12, padding:8, background:"#1a1610", borderRadius:4}}>
+                        <div style={{fontSize:11, color:"#a89060", marginBottom:4}}>Practice Statistics</div>
+                        <div style={{fontSize:10, color:"#665040"}}>
+                          Current: Measure {currentMeasure}<br/>
+                          Segments: {trainingSegments.length}<br/>
+                          Sticky Notes: {stickyNotes.length}
+                        </div>
+                      </div>
                     </>
                   )}
                 </>
               )}
             </div>
           )}
- 
+
+          {sidebarTab === "metronome" && (
+            <div style={styles.markingsCard}>
+              <div style={{fontSize:12, color:"#a89060", marginBottom:8}}>
+                <strong>Metronome</strong> - Practice timing and rhythm
+              </div>
+              {!rhythmInfo ? (
+                <div style={{fontSize:11, color:"#665040", padding:8, background:"#1a1610", borderRadius:4}}>
+                  Load a score to enable metronome features.
+                </div>
+              ) : (
+                <>
+                  <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
+                    ♪ Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}
+                  </div>
+                  
+                  <div style={styles.settingRow}>
+                    <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                      <input type="checkbox" checked={settings.metronomeEnabled} onChange={e => setSettings({...settings, metronomeEnabled: e.target.checked})} style={{marginRight:0}}/>
+                      <span style={{fontSize:12, color:"#a89060"}}>Enable metronome</span>
+                    </label>
+                  </div>
+                  
+                  {settings.metronomeEnabled && (
+                    <>
+                      <div style={{marginTop:12, marginBottom:8}}>
+                        <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Metronome Controls</div>
+                        <div style={{display:"flex", gap:6, marginBottom:8}}>
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
+                            onClick={startMetronome}>
+                            ▶️ Start
+                          </button>
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#a52"}} 
+                            onClick={stopMetronome}>
+                            ⏹ Stop
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}} 
+                        onClick={async () => {
+                          try {
+                            const response = await fetch("/playback/metronome", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                              body: new URLSearchParams({
+                                bpm: String(rhythmInfo.tempo_bpm),
+                                time_signature: rhythmInfo.time_signature,
+                                duration_seconds: "30",
+                                accent_first: "true"
+                              })
+                            });
+                            if (response.ok) {
+                              const blob = await response.blob();
+                              const url = URL.createObjectURL(blob);
+                              if (audioElementRef.current) {
+                                audioElementRef.current.src = url;
+                                await audioElementRef.current.play();
+                              }
+                            } else {
+                              console.error("Metronome generation failed", await response.text());
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}>
+                        🎵 Generate Metronome Track
+                      </button>
+                      
+                      <div style={{marginTop:12, padding:8, background:"#1a1610", borderRadius:4}}>
+                        <div style={{fontSize:11, color:"#a89060", marginBottom:4}}>Metronome Settings</div>
+                        <div style={{fontSize:10, color:"#665040"}}>
+                          BPM: {rhythmInfo.tempo_bpm}<br/>
+                          Time Signature: {rhythmInfo.time_signature}<br/>
+                          Status: {metronomeActive ? "Active" : "Inactive"}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {sidebarTab === "settings" && (
             <div style={styles.markingsCard}>
               <div style={styles.settingRow}>
@@ -1070,6 +1424,24 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   <input type="number" min="1" max="8" value={settings.restAlertAdvance} onChange={e => setSettings({...settings, restAlertAdvance: parseInt(e.target.value)})} style={{width:"40px", padding:"3px", marginLeft:"auto", background:"#1e1a14", border:"1px solid #3a2e1e", color:"#a89060", borderRadius:4}}/>
                 </div>
               )}
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.markingSuggestionsEnabled} onChange={e => setSettings({...settings, markingSuggestionsEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Marking suggestions</span>
+                </label>
+              </div>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.stickyNotesEnabled} onChange={e => setSettings({...settings, stickyNotesEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Sticky notes</span>
+                </label>
+              </div>
+              <div style={styles.settingRow}>
+                <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
+                  <input type="checkbox" checked={settings.voiceMeasureJumpEnabled} onChange={e => setSettings({...settings, voiceMeasureJumpEnabled: e.target.checked})} style={{marginRight:0}}/>
+                  <span style={{fontSize:12, color:"#a89060"}}>Voice measure jumping</span>
+                </label>
+              </div>
               {rhythmInfo && (
                 <button style={{...styles.profileBtn, marginTop:12, width:"100%", background:"#C9A84C22", color:"#C9A84C", border:"1px solid #C9A84C"}} onClick={() => setTempoPrompt(true)}>
                   ♩ Start Tempo Prompt
@@ -1252,5 +1624,31 @@ const styles = {
   tempoBtn: {
     background:"#C9A84C", color:"#1a1200", border:"none", borderRadius:6,
     padding:"8px 16px", fontSize:12, fontWeight:700, cursor:"pointer",
+  },
+  markingSuggestionsBanner: {
+    background:"#2a2418", color:"#d4af9f", padding:"12px 16px", textAlign:"left",
+    fontSize:13, position:"relative", zIndex:98, borderBottom:"1px solid #3a2e1e",
+  },
+  stickyNotesOverlay: {
+    position:"absolute", top:0, left:0, right:0, bottom:0, pointerEvents:"none", zIndex:97,
+  },
+  stickyNote: {
+    position:"absolute", width:120, minHeight:60, padding:"8px 10px", borderRadius:6,
+    boxShadow:"0 4px 12px rgba(0,0,0,0.3)", cursor:"pointer", pointerEvents:"auto",
+    border:"2px solid #C9A84C", transform:"rotate(-2deg)",
+  },
+  stickyNoteText: {
+    fontSize:11, color:"#1a1200", lineHeight:1.3, wordWrap:"break-word",
+  },
+  stickyNoteMeasure: {
+    fontSize:9, color:"#665040", marginTop:4, textAlign:"right", fontWeight:700,
+  },
+  stickyNoteModeOverlay: {
+    position:"absolute", top:0, left:0, right:0, bottom:0, background:"rgba(201, 168, 76, 0.1)",
+    cursor:"crosshair", zIndex:96, display:"flex", alignItems:"center", justifyContent:"center",
+  },
+  stickyNoteModeHint: {
+    background:"#C9A84C", color:"#1a1200", padding:"8px 16px", borderRadius:6,
+    fontSize:12, fontWeight:700, boxShadow:"0 4px 16px rgba(0,0,0,0.4)",
   },
 };
