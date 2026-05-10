@@ -18,7 +18,7 @@ import struct
 import math
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from deps import get_current_user
@@ -28,7 +28,6 @@ from musescore_converter import (
     convert_to_musicxml,
     convert_to_pdf,
     is_available as musescore_available,
-    MuseScoreNotInstalled,
     ConversionError,
 )
 from database import get_conn
@@ -106,7 +105,7 @@ def _midi_to_frequency(midi_note):
 
 def _extract_musicxml_notes(xml_bytes, tempo_override=None):
     try:
-        from music21 import converter, note as m21_note, chord as m21_chord, tempo as m21_tempo
+        from music21 import converter, note as m21_note, chord as m21_chord
         score = converter.parseData(xml_bytes)
         mark = score.metronomeMarkBoundaries()
         bpm = tempo_override or 120
@@ -403,7 +402,7 @@ async def generate_metronome(
     - tempo_bpm: Beats per minute
     - time_signature: e.g., "4/4", "3/4", "6/8"
     - duration_beats: Number of beats to generate
-    
+
     Returns WAV file with metronome clicks.
     """
     sample_rate = 44100
@@ -411,25 +410,25 @@ async def generate_metronome(
     beat_duration = 60 / tempo_bpm  # seconds per beat
     samples_per_beat = int(sample_rate * beat_duration)
     click_length = int(sample_rate * 0.05)  # 50ms clicks
-    
+
     audio_data = bytearray()
     beats_per_measure = int(time_signature.split("/")[0])
-    
+
     for beat in range(duration_beats):
         # Accent first beat of measure (louder)
         is_accented = (beat % beats_per_measure) == 0
         amplitude = 32000 if is_accented else 16000
-        
+
         # Generate sine wave click
         for i in range(click_length):
             phase = 2 * math.pi * frequency * i / sample_rate
             sample = int(amplitude * math.sin(phase))
             audio_data.extend(struct.pack('<h', sample))
-        
+
         # Silence until next beat
         silence = samples_per_beat - click_length
         audio_data.extend(b'\x00' * (silence * 2))
-    
+
     # Create WAV buffer
     wav_buffer = io.BytesIO()
     with wave.open(wav_buffer, 'wb') as wav:
@@ -437,7 +436,7 @@ async def generate_metronome(
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
         wav.writeframes(bytes(audio_data))
-    
+
     wav_bytes = wav_buffer.getvalue()
     return Response(
         content=wav_bytes,
@@ -457,13 +456,13 @@ async def get_rhythm_info(
     """
     data = await file.read()
     ext = Path(file.filename or "").suffix.lower()
-    
+
     if ext not in (".xml", ".musicxml", ".mxl"):
         raise HTTPException(
             status_code=422,
             detail="Rhythm analysis requires a MusicXML file.",
         )
-    
+
     report = analyze_musicxml(data)
     return {
         "rhythm_info": report.rhythm_info.to_dict() if report.rhythm_info else None,
@@ -484,15 +483,15 @@ async def extract_parts(
     """
     data = await file.read()
     ext = Path(file.filename or "").suffix.lower()
-    
+
     if ext not in (".xml", ".musicxml", ".mxl"):
         raise HTTPException(
             status_code=422,
             detail="Part extraction requires a MusicXML file.",
         )
-    
+
     text = data.decode("utf-8", errors="ignore")
-    
+
     # Extract part list
     parts = []
     part_list_match = re.search(r'<part-list>(.*?)</part-list>', text, re.S)
@@ -501,33 +500,33 @@ async def extract_parts(
         for score_part in re.finditer(r'<score-part\s+id="([^"]+)"[^>]*>(.*?)</score-part>', part_list_body, re.S):
             part_id = score_part.group(1)
             part_body = score_part.group(2)
-            
+
             # Extract part name
             name_match = re.search(r'<part-name[^>]*>([^<]+)</part-name>', part_body)
             part_name = name_match.group(1) if name_match else f"Part {part_id}"
-            
+
             # Extract abbreviation
             abbr_match = re.search(r'<part-abbreviation[^>]*>([^<]+)</part-abbreviation>', part_body)
             part_abbr = abbr_match.group(1) if abbr_match else part_name[:3]
-            
+
             # Extract instrument
             instr_match = re.search(r'<score-instrument\s+id="[^"]*"[^>]*>\s*<instrument-name[^>]*>([^<]+)</instrument-name>', part_body)
             instrument = instr_match.group(1) if instr_match else "Unknown"
-            
+
             parts.append({
                 "id": part_id,
                 "name": part_name,
                 "abbreviation": part_abbr,
                 "instrument": instrument,
             })
-    
+
     return {"parts": parts}
 
 
 @router.post("/training/synthesize")
 async def generate_synthesizer_track(
     file: UploadFile = File(...),
-    tempo_override: int | None = None,
+    tempo_override: int | None = Form(default=None),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -558,31 +557,30 @@ async def generate_synthesizer_track(
 @router.post("/training/segments")
 async def extract_training_segments(
     file: UploadFile = File(...),
-    segment_size: int = 4,
+    segment_size: int = Form(default=4),
     current_user: dict = Depends(get_current_user),
 ):
     """
     Break score into practice segments.
     segment_size: number of measures per segment
-    
+
     Returns list of segments with timing info.
-    Phase 2: Generate individual segment playback files.
     """
     data = await file.read()
     ext = Path(file.filename or "").suffix.lower()
-    
+
     if ext not in (".xml", ".musicxml", ".mxl"):
         raise HTTPException(
             status_code=422,
             detail="Segment extraction requires a MusicXML file.",
         )
-    
+
     text = data.decode("utf-8", errors="ignore")
-    
+
     # Extract measures
     measures = []
     measure_pattern = r'<measure\b[^>]*number="([^"]*)"[^>]*>(.*?)</measure>'
-    
+
     for match in re.finditer(measure_pattern, text, re.S):
         measure_num = int(match.group(1)) if match.group(1).isdigit() else 1
         measure_body = match.group(2)
@@ -591,14 +589,16 @@ async def extract_training_segments(
             "hasRests": bool(re.search(r'<rest\b', measure_body)),
             "hasAccents": bool(re.search(r'<accent', measure_body)),
         })
-    
+
     # Group into segments
     segments = []
     for i in range(0, len(measures), segment_size):
         segment_measures = measures[i:i+segment_size]
+        if not segment_measures:
+            continue
         start_measure = segment_measures[0]["number"]
         end_measure = segment_measures[-1]["number"]
-        
+
         segments.append({
             "segment_id": len(segments) + 1,
             "start_measure": start_measure,
@@ -609,5 +609,5 @@ async def extract_training_segments(
                 "hasAccents": any(m["hasAccents"] for m in segment_measures),
             },
         })
-    
+
     return {"segments": segments, "total_segments": len(segments)}

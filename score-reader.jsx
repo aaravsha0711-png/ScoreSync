@@ -1,5 +1,5 @@
-﻿import { useState, useEffect, useRef, useCallback } from "react";
- 
+import { useState, useEffect, useRef, useCallback } from "react";
+
 // Backend API helpers
 
 const MIN_NOTE_STABILITY_MS = 80;
@@ -56,8 +56,8 @@ function calibrationToRequest(calibration) {
   };
 }
 
-// â”€â”€â”€ App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+//  App
+
 export default function App() {
   const [screen, setScreen] = useState("auth");
   const [user, setUser] = useState(null);
@@ -143,8 +143,8 @@ export default function App() {
   return <MainScreen user={user} profile={profile} onLogout={handleLogout} onRecalibrate={() => setScreen("calibrate")} />;
 }
 
-// â”€â”€â”€ Auth Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+//  Auth Screen
+
 function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onToggleMode }) {
   const isLogin = mode === "login";
   return (
@@ -153,7 +153,7 @@ function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onTogg
         <div style={styles.authLogo}>
           <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#C9A84C"/>
-            <text x="20" y="26" textAnchor="middle" fontSize="18" fill="#1a1a1a" fontFamily="serif">â™ª</text>
+            <text x="20" y="26" textAnchor="middle" fontSize="18" fill="#1a1a1a" fontFamily="serif">S</text>
           </svg>
           <span style={styles.authBrand}>ScoreSync</span>
         </div>
@@ -177,9 +177,9 @@ function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onTogg
     </div>
   );
 }
- 
-// â”€â”€â”€ Instrument Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+
+//  Instrument Screen
+
 function InstrumentScreen({ onSave }) {
   const [selected, setSelected] = useState("Concert (C)");
   const instruments = Object.keys(TRANSPOSITIONS);
@@ -190,7 +190,7 @@ function InstrumentScreen({ onSave }) {
           <span style={styles.authBrand}>Select Your Instrument</span>
         </div>
         <p style={styles.instrNote}>
-          ScoreSync will display all scales in <strong>concert pitch</strong>. 
+          ScoreSync will display all scales in <strong>concert pitch</strong>.
           For transposing instruments, parts will be transposed automatically on the backend.
         </p>
         <div style={styles.instrGrid}>
@@ -201,19 +201,19 @@ function InstrumentScreen({ onSave }) {
         </div>
         {TRANSPOSITIONS[selected] !== 0 && (
           <div style={styles.transpBadge}>
-            â†• Transposes {Math.abs(TRANSPOSITIONS[selected])} semitone{Math.abs(TRANSPOSITIONS[selected])!==1?"s":""} {TRANSPOSITIONS[selected]>0?"up":"down"} from concert
+             Transposes {Math.abs(TRANSPOSITIONS[selected])} semitone{Math.abs(TRANSPOSITIONS[selected])!==1?"s":""} {TRANSPOSITIONS[selected]>0?"up":"down"} from concert
           </div>
         )}
         <button style={{...styles.authBtn, marginTop: 24}} onClick={() => onSave(selected)}>
-          Continue to Calibration â†’
+          Continue
         </button>
       </div>
     </div>
   );
 }
- 
-// â”€â”€â”€ Calibration Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+
+//  Calibration Screen
+
 function CalibrationScreen({ instrument, onDone, onSkip }) {
   const ALL_SCALES = [...MAJOR_SCALES, ...MEYER_SCALES];
   const [step, setStep] = useState(0);
@@ -228,14 +228,14 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
   const rafRef = useRef(null);
   const bufRef = useRef(null);
   const streamRef = useRef(null);
- 
+
   const scale = ALL_SCALES[step];
   const totalSteps = ALL_SCALES.length;
   const transposedScale = {
     ...scale,
     notes: scale.notes.map(n => ((n + TRANSPOSITIONS[instrument]) + 12) % 12)
   };
- 
+
   const startMic = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -255,14 +255,14 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
       alert("Microphone access denied. Please allow mic access in your browser.");
     }
   }, []);
- 
+
   const stopMic = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     if (audioCtxRef.current) audioCtxRef.current.close();
     setIsListening(false);
   }, []);
- 
+
   useEffect(() => {
     if (!isListening || !analyserRef.current) return;
     const loop = () => {
@@ -285,7 +285,7 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
   }, [isListening, scale]);
- 
+
   function handleSaveAndNext() {
     const cd = { ...calibData, [scale.name]: { detectedNotes, instrument } };
     setCalibData(cd);
@@ -300,9 +300,9 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
       setPhase("playing");
     }
   }
- 
+
   const progress = Math.round((step / totalSteps) * 100);
- 
+
   return (
     <div style={styles.authBg}>
       <div style={{...styles.authCard, maxWidth: 580}}>
@@ -313,7 +313,7 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
               Calibration is optional. You can play a few scales now, or skip and let ScoreSync learn your tuning tendencies during practice.
             </p>
             <p style={{color:"#C9A84C", fontSize:13}}>
-              All scales displayed in <strong>concert pitch</strong>. 
+              All scales displayed in <strong>concert pitch</strong>.
               {TRANSPOSITIONS[instrument] !== 0 && ` Your ${instrument} part will be transposed automatically.`}
             </p>
             <div style={{display:"flex", gap:12, marginTop:20}}>
@@ -342,7 +342,7 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
                 );
               })}
             </div>
- 
+
             <div style={styles.freqDisplay}>
               {currentFreq > 0 ? (
                 <>
@@ -350,19 +350,19 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
                   <span style={styles.freqNote}>{freqToNoteLabel(currentFreq)}</span>
                 </>
               ) : (
-                <span style={{color:"#666"}}>Play the scale above ascending and descendingâ€¦</span>
+                <span style={{color:"#666"}}>Play the scale above ascending and descending</span>
               )}
             </div>
- 
+
             <div style={{display:"flex", gap:12, marginTop:20, justifyContent:"center"}}>
               {!isListening ? (
-                <button style={styles.authBtn} onClick={startMic}>ðŸŽ™ Start Listening</button>
+                <button style={styles.authBtn} onClick={startMic}>Start Listening</button>
               ) : (
                 <>
                   <button style={{...styles.authBtn, background:"#2a5"}} onClick={handleSaveAndNext}>
-                    âœ“ Save & Next Scale
+                    Save & Next Scale
                   </button>
-                  <button style={{...styles.authToggle}} onClick={stopMic}>â¹ Stop Mic</button>
+                  <button style={{...styles.authToggle}} onClick={stopMic}>Stop Mic</button>
                 </>
               )}
               <button style={styles.authToggle} onClick={onSkip}>Skip calibration</button>
@@ -373,9 +373,9 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
     </div>
   );
 }
- 
-// â”€â”€â”€ Main Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+
+//  Main Screen
+
 function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [score, setScore] = useState(null);
   const [scoreType, setScoreType] = useState(null);
@@ -494,17 +494,17 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     voiceMeasureJumpEnabled: true,
     liveAnalysisEnabled: true,
   });
-  
+
   const [metronomeState, setMetronomeState] = useState({
     isPlaying: false,
     bpm: 120,
     intervalId: null,
   });
-  
+
   const metronomeActive = metronomeState.isPlaying;
-  
+
   const audioElementRef = useRef(null);
- 
+
   useEffect(() => {
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/opensheetmusicdisplay/1.8.6/opensheetmusicdisplay.min.js";
@@ -513,7 +513,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     document.head.appendChild(script);
     return () => document.head.removeChild(script);
   }, []);
- 
+
   useEffect(() => {
     if (!osmdLoaded || !score || scoreType !== "musicxml") return;
     const container = osmdContainerRef.current;
@@ -531,7 +531,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       setOsmdError("Score render error: " + e.message);
     }
   }, [osmdLoaded, score, scoreType]);
- 
+
   async function handleFileLoad(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -546,34 +546,34 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       const text = await file.text();
       setScore(text);
       setScoreType("musicxml");
-      
+
       // Analyze markings locally
       const baseMarkings = analyzeMarkings(text);
       setMarkings(baseMarkings);
-      
+
       // Extract rhythm info and complex markings
       const rhythmMatch = text.match(/<time>\s*<beats>(\d+)<\/beats>\s*<beat-type>(\d+)<\/beat-type>/);
       const timeSignature = rhythmMatch ? `${rhythmMatch[1]}/${rhythmMatch[2]}` : "4/4";
-      
+
       const tempoMatch = text.match(/<metronome>[\s\S]*?<per-minute>(\d+)<\/per-minute>/);
       const tempo = tempoMatch ? parseInt(tempoMatch[1]) : 120;
-      
+
       const noteCount = (text.match(/<note\b/g) || []).length;
       const restCount = (text.match(/<rest\b/g) || []).length;
-      
+
       setRhythmInfo({
         time_signature: timeSignature,
         tempo_bpm: tempo,
         note_count: noteCount,
         rest_count: restCount,
       });
-      
+
       setMetronomeState(prev => ({ ...prev, bpm: tempo }));
       setCurrentRestAlert(null);
       setTrainingSegments([]);
       setScoreNoteNames(extractScoreNoteNames(text));
       setRestAlerts(extractRestAlerts(text));
-      
+
       // Extract complex markings
       const markingsList = [];
       const measures = text.match(/<measure[^>]*number="([^"]*)"[^>]*>([\s\S]*?)<\/measure>/g) || [];
@@ -596,11 +596,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       setScoreType("musescore");
       setMarkings([]);
     } else {
-      alert("Supported: .pdf, .xml, .musicxml, .mxl (MuseScore requires server conversion)");
+      setErrorMessage("Supported: .pdf, .xml, .musicxml, .mxl, .mscz, .mscx");
     }
     e.target.value = "";
   }
-  
+
   const startMetronome = useCallback(async () => {
     if (!rhythmInfo) return;
     setLoadingMetronome(true);
@@ -627,7 +627,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       setLoadingMetronome(false);
     }
   }, [metronomeState.bpm, rhythmInfo]);
-  
+
   const stopMetronome = useCallback(() => {
     if (audioElementRef.current) {
       audioElementRef.current.pause();
@@ -635,14 +635,14 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     }
     setMetronomeState(prev => ({ ...prev, isPlaying: false }));
   }, []);
-  
+
   const handleStickyNoteClick = useCallback((event) => {
     if (!stickyNoteMode || !scoreContainerRef.current) return;
-    
+
     const rect = scoreContainerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    
+
     const newNote = {
       id: Date.now(),
       x: x,
@@ -652,12 +652,12 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       color: '#FFFF88',
       editing: true
     };
-    
+
     setStickyNotes(prev => [...prev, newNote]);
   }, [stickyNoteMode, currentMeasure]);
 
   const updateStickyNote = useCallback((id, updates) => {
-    setStickyNotes(prev => prev.map(note => 
+    setStickyNotes(prev => prev.map(note =>
       note.id === id ? { ...note, ...updates } : note
     ));
   }, []);
@@ -698,7 +698,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   // Voice recognition for measure jumping
   useEffect(() => {
     let recognition = null;
-    
+
     if (settings.voiceMeasureJumpEnabled && isListening) {
       recognition = startVoiceRecognition((measureNumber) => {
         const targetMeasure = Math.max(1, measureNumber + 4);
@@ -717,7 +717,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       }
       setVoiceRecognitionActive(false);
     }
-    
+
     return () => {
       if (recognition) {
         recognition.stop();
@@ -751,7 +751,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       setMarkingSuggestions([]);
     }
   }, [currentMeasure, settings.markingSuggestionsEnabled, settings.liveAnalysisEnabled, rhythmInfo, complexMarkings, rmsLevel, spectralCentroid, spectralFlatness, attackMs, releaseMs, vibratoStrength, performanceArticulation]);
- 
+
   const startMic = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -764,9 +764,9 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       bufRef.current = new Float32Array(analyser.fftSize);
       ctx.createMediaStreamSource(stream).connect(analyser);
       setIsListening(true);
-    } catch { alert("Microphone access required."); }
+    } catch { setErrorMessage("Microphone access is required for pitch detection."); }
   }, []);
- 
+
   const stopMic = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
@@ -774,7 +774,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     setIsListening(false);
     setCurrentFreq(0); setCurrentNote(null); setCurrentMidi(null); setCents(0);
   }, []);
-  
+
   // Monitor for wrong notes and rest alerts
   useEffect(() => {
     if (!isListening || !currentNote) return;
@@ -789,7 +789,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       }
     }
   }, [isListening, currentNote, settings.stopAtWrongNote, settings.loopOnWrongNote, scoreNoteNames]);
- 
+
   useEffect(() => {
     if (!isListening || !analyserRef.current) return;
     const loop = () => {
@@ -870,7 +870,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
   }, [isListening, settings, restAlerts, rhythmInfo, advanceOsmdCursor, getOsmdMeasureIndex]);
- 
+
   useEffect(() => {
     if (!autoScroll || !isListening || !scoreContainerRef.current) return;
     const id = setInterval(() => {
@@ -883,28 +883,28 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     }, 120);
     return () => clearInterval(id);
   }, [autoScroll, isListening, currentFreq, isAutoScrollPaused, settings.pauseOnSilence, scrollToOsmdCursor]);
- 
+
   const tunerColor = Math.abs(cents) < 10 ? "#2aee6e" : Math.abs(cents) < 25 ? "#f5c542" : "#ee4444";
   const tunerOffset = Math.max(-50, Math.min(50, cents));
- 
+
   return (
     <div style={styles.mainBg}>
       <div style={styles.topBar}>
         <div style={styles.topBrand}>
           <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#C9A84C"/>
-            <text x="20" y="27" textAnchor="middle" fontSize="20" fill="#1a1a1a" fontFamily="serif">â™ª</text>
+            <text x="20" y="27" textAnchor="middle" fontSize="20" fill="#1a1a1a" fontFamily="serif"></text>
           </svg>
           <span style={styles.topBrandName}>ScoreSync</span>
         </div>
         <div style={styles.topControls}>
           <label style={styles.uploadBtn}>
-            ðŸ“‚ Load Score
+            Load Score
             <input type="file" accept=".pdf,.xml,.musicxml,.mxl,.mscz,.mscx" style={{display:"none"}} onChange={handleFileLoad}/>
           </label>
           <button style={{...styles.micBtn, ...(isListening ? styles.micBtnActive : {})}}
             onClick={isListening ? stopMic : startMic}>
-            {isListening ? "ðŸ”´ Stop Mic" : "ðŸŽ™ Start Mic"}
+            {isListening ? "Stop Mic" : "Start Mic"}
           </button>
           <label style={styles.topToggle}>
             <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} style={{marginRight:6}}/>
@@ -912,21 +912,21 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           </label>
           {isAutoScrollPaused && (
             <button style={{...styles.micBtn, background:"#2a5", border:"1px solid #4a9"}} onClick={() => setIsAutoScrollPaused(false)}>
-              â–¶ Resume
+              Resume
             </button>
           )}
           {loopMode !== "none" && (
             <span style={{fontSize:11, color:"#C9A84C", padding:"4px 8px", background:"#2a2010", borderRadius:4}}>
-              ðŸ”„ {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
+               {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
             </span>
           )}
           <button style={{...styles.micBtn, ...(stickyNoteMode ? {background:"#C9A84C", color:"#1a1200"} : {})}}
             onClick={() => setStickyNoteMode(!stickyNoteMode)}>
-            ðŸ“Œ {stickyNoteMode ? "Exit Notes" : "Sticky Notes"}
+            {stickyNoteMode ? "Exit Notes" : "Sticky Notes"}
           </button>
           {voiceRecognitionActive && (
             <span style={{fontSize:11, color:"#2aee6e", padding:"4px 8px", background:"#1a2a1a", borderRadius:4}}>
-              ðŸŽ¤ Voice Active
+              Voice Active
             </span>
           )}
           <div style={styles.userBadge} onClick={() => setShowProfile(p => !p)}>
@@ -935,24 +935,31 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           </div>
         </div>
       </div>
- 
+
       {showProfile && (
         <div style={styles.profileDrop}>
           <div style={styles.profileItem}><strong>{user.name}</strong></div>
           <div style={styles.profileItem}>{user.email}</div>
-          <div style={styles.profileItem}>ðŸŽº {profile.instrument}</div>
+          <div style={styles.profileItem}>{profile.instrument}</div>
           <button style={styles.profileBtn} onClick={onRecalibrate}>Recalibrate</button>
           <button style={{...styles.profileBtn, color:"#ee4444"}} onClick={onLogout}>Sign Out</button>
         </div>
       )}
-      
+
+      {errorMessage && (
+        <div style={styles.errorBanner}>
+          <span>{errorMessage}</span>
+          <button style={styles.errorDismiss} onClick={() => setErrorMessage(null)}>Dismiss</button>
+        </div>
+      )}
+
       {/* Rest Alert Notification */}
       {currentRestAlert && settings.restAlertEnabled && (
         <div style={{...styles.alertBanner}}>
-          â° Rest Alert: Measure {currentRestAlert.measure} in {currentRestAlert.beatsUntil.toFixed(1)} beat(s)
+          Rest Alert: Measure {currentRestAlert.measure} in {currentRestAlert.beatsUntil.toFixed(1)} beat(s)
         </div>
       )}
-      
+
       {/* Tempo Prompter */}
       {tempoPrompt && rhythmInfo && (
         <div style={styles.tempoPrompter}>
@@ -960,22 +967,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           <div style={styles.tempoSubtitle}>{rhythmInfo.time_signature}</div>
           <div style={{display:"flex", gap:8, marginTop:12, justifyContent:"center"}}>
             <button style={styles.tempoBtn} onClick={startMetronome}>
-              {metronomeState.isPlaying ? "ðŸ”´ Stop" : "â–¶ Play Metronome"}
+              {metronomeState.isPlaying ? "Stop" : "Play Metronome"}
             </button>
             <button style={{...styles.tempoBtn, background:"#1e1a14"}} onClick={() => setTempoPrompt(false)}>
-              âœ“ Ready
+              Ready
             </button>
           </div>
         </div>
       )}
- 
+
       <div style={styles.mainBody}>
         <div style={styles.scorePanel} ref={scoreContainerRef}>
           {/* Rest Alert Banner */}
           {settings.restAlertEnabled && currentRestAlert && (
             <div style={{...styles.restAlertBanner, background: currentRestAlert.isCritical ? "#8b2e2e" : "#3a3824"}}>
               <div style={{fontSize:14, fontWeight:700, color: currentRestAlert.isCritical ? "#ff6b6b" : "#C9A84C"}}>
-                âš  REST ALERT - Measure {currentRestAlert.measure}
+                REST ALERT - Measure {currentRestAlert.measure}
               </div>
               <div style={{fontSize:12, color: currentRestAlert.isCritical ? "#ffb3b3" : "#d4af9f", marginTop:4}}>
                 {currentRestAlert.isCritical ? "REST ENDS IN 1 BEAT" : `Rest in ${currentRestAlert.beatsUntil.toFixed(1)} beats`}
@@ -987,11 +994,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           {settings.markingSuggestionsEnabled && markingSuggestions.length > 0 && (
             <div style={styles.markingSuggestionsBanner}>
               <div style={{fontSize:14, fontWeight:700, color:"#C9A84C", marginBottom:4}}>
-                ðŸ’¡ Performance Enhancement Suggestions
+                Performance Suggestions
               </div>
               {markingSuggestions.slice(0,2).map((suggestion, i) => (
                 <div key={i} style={{fontSize:12, color:"#d4af9f", marginBottom:2}}>
-                  â€¢ {suggestion.suggestion}
+                   {suggestion.suggestion}
                 </div>
               ))}
               {performanceArticulation && (
@@ -1058,13 +1065,13 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               onClick={handleStickyNoteClick}
             >
               <div style={styles.stickyNoteModeHint}>
-                ðŸ“Œ Click anywhere on the score to add a sticky note
+                 Click anywhere on the score to add a sticky note
               </div>
             </div>
           )}
           {!score ? (
             <div style={styles.scorePlaceholder}>
-              <div style={styles.placeholderIcon}>ð„ž</div>
+              <div style={styles.placeholderIcon}>S</div>
               <div style={styles.placeholderText}>Load a score to begin</div>
               <div style={styles.placeholderSub}>Supports PDF, MusicXML (.xml, .mxl, .musicxml)<br/>MuseScore files require server-side conversion</div>
             </div>
@@ -1077,13 +1084,13 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
             </>
           ) : (
             <div style={styles.scorePlaceholder}>
-              <div style={styles.placeholderIcon}>âš™ï¸</div>
+              <div style={styles.placeholderIcon}>MS</div>
               <div style={styles.placeholderText}>MuseScore file detected</div>
-              <div style={styles.placeholderSub}>MuseScore (.mscz) files require server-side<br/>conversion via MuseScore CLI. Connect a backend<br/>to enable this.</div>
+              <div style={styles.placeholderSub}>MuseScore files can be converted by the connected backend when MuseScore CLI is configured.</div>
             </div>
           )}
         </div>
- 
+
         <div style={styles.rightPanel}>
           <div style={styles.pitchCard}>
             <div style={styles.pitchTitle}>Live Pitch</div>
@@ -1096,16 +1103,16 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   <div style={styles.tunerCenter}/>
                 </div>
                 <div style={{...styles.centsLabel, color: tunerColor}}>
-                  {cents > 0 ? "+" : ""}{cents.toFixed(1)}Â¢
+                  {cents > 0 ? "+" : ""}{cents.toFixed(1)} cents
                 </div>
               </>
             ) : (
               <div style={styles.pitchIdle}>
-                {isListening ? "Listeningâ€¦" : "Start mic to detect pitch"}
+                {isListening ? "Listening" : "Start mic to detect pitch"}
               </div>
             )}
           </div>
- 
+
           <div style={styles.historyCard}>
             <div style={styles.pitchTitle}>Recent Notes</div>
             <div style={styles.historyScroll}>
@@ -1115,14 +1122,14 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               ))}
             </div>
           </div>
- 
+
           <div style={styles.sidebarTabs}>
             {["markings","info","training","metronome","settings"].map(t => (
               <button key={t} style={{...styles.sidebarTab, ...(sidebarTab===t ? styles.sidebarTabActive:{})}}
                 onClick={() => setSidebarTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>
             ))}
           </div>
- 
+
           {sidebarTab === "markings" && (
             <div style={styles.markingsCard}>
               {markings.length === 0 ? (
@@ -1132,13 +1139,13 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               ) : markings.map((m,i) => (
                 <div key={i} style={styles.markingItem}>
                   <span style={styles.markingType}>{m.type}</span>
-                  <span style={styles.markingCount}>Ã—{m.count}</span>
+                  <span style={styles.markingCount}>x{m.count}</span>
                   <span style={styles.markingDetail}>{m.detail}</span>
                 </div>
               ))}
             </div>
           )}
- 
+
           {sidebarTab === "info" && (
             <div style={styles.markingsCard}>
               <div style={styles.infoRow}>
@@ -1164,7 +1171,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               </button>
             </div>
           )}
- 
+
           {sidebarTab === "training" && (
             <div style={styles.markingsCard}>
               <div style={{fontSize:12, color:"#a89060", marginBottom:8}}>
@@ -1185,15 +1192,15 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   {trainingMode && rhythmInfo && (
                     <>
                       <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
-                        â™ª Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
+                        Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
                         Notes: {rhythmInfo.note_count} | Rests: {rhythmInfo.rest_count}<br/>
                         Current Measure: {currentMeasure}
                       </div>
-                      
+
                       <div style={{marginTop:12, marginBottom:8}}>
                         <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Playback Controls</div>
                         <div style={{display:"flex", gap:6, marginBottom:8}}>
-                          <button style={{...styles.profileBtn, flex:1, fontSize:11}} 
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11}}
                             disabled={loadingSynthesis}
                             onClick={async () => {
                               if (!score || scoreType !== "musicxml") return;
@@ -1222,21 +1229,21 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                 setLoadingSynthesis(false);
                               }
                             }}>
-                            {loadingSynthesis ? "â³ Synthesizing..." : "ðŸŽµ Synth Track"}
+                            {loadingSynthesis ? "Synthesizing..." : "Synth Track"}
                           </button>
-                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}}
                             onClick={() => {
                               if (audioElementRef.current) {
                                 audioElementRef.current.pause();
                                 audioElementRef.current.currentTime = 0;
                               }
                             }}>
-                            â¹ Stop
+                             Stop
                           </button>
                         </div>
                       </div>
-                      
-                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}} 
+
+                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}}
                         onClick={async () => {
                           if (!score || scoreType !== "musicxml") return;
                           const form = new FormData();
@@ -1255,9 +1262,9 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                             setErrorMessage(`Segment error: ${err.message}`);
                           }
                         }}>
-                        ðŸ“Š Extract Segments
+                        Extract Segments
                       </button>
-                      
+
                       {trainingSegments.length > 0 && (
                         <div style={{marginTop:12, borderTop:"1px solid #2a2010", paddingTop:10}}>
                           <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Practice Segments ({trainingSegments.length})</div>
@@ -1271,16 +1278,16 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                     scrollToMeasure(segment.start_measure);
                                   }
                                 }}>
-                                <div style={{fontWeight:700}}>Segment {segment.segment_id}: M{segment.start_measure}â€“{segment.end_measure}</div>
+                                <div style={{fontWeight:700}}>Segment {segment.segment_id}: M{segment.start_measure}-{segment.end_measure}</div>
                                 <div style={{fontSize:11, color:"#8e7b55", marginTop:2}}>
-                                  {segment.measure_count} measures â€¢ rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
+                                  {segment.measure_count} measures - rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
                                 </div>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
-                      
+
                       <div style={{marginTop:12, padding:8, background:"#1a1610", borderRadius:4}}>
                         <div style={{fontSize:11, color:"#a89060", marginBottom:4}}>Practice Statistics</div>
                         <div style={{fontSize:10, color:"#665040"}}>
@@ -1308,45 +1315,42 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               ) : (
                 <>
                   <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
-                    â™ª Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}
+                    Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}
                   </div>
-                  
+
                   <div style={styles.settingRow}>
                     <label style={{display:"flex", alignItems:"center", gap:6, cursor:"pointer"}}>
                       <input type="checkbox" checked={settings.metronomeEnabled} onChange={e => setSettings({...settings, metronomeEnabled: e.target.checked})} style={{marginRight:0}}/>
                       <span style={{fontSize:12, color:"#a89060"}}>Enable metronome</span>
                     </label>
                   </div>
-                  
+
                   {settings.metronomeEnabled && (
                     <>
                       <div style={{marginTop:12, marginBottom:8}}>
                         <div style={{fontSize:11, color:"#a89060", marginBottom:6}}>Metronome Controls</div>
                         <div style={{display:"flex", gap:6, marginBottom:8}}>
-                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}}
                             onClick={startMetronome}>
-                            â–¶ï¸ Start
+                             Start
                           </button>
-                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#a52"}} 
+                          <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#a52"}}
                             onClick={stopMetronome}>
-                            â¹ Stop
+                             Stop
                           </button>
                         </div>
                       </div>
-                      
-                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}} 
+
+                      <button style={{...styles.profileBtn, marginTop:6, width:"100%", background:"#1e1a14"}}
                         onClick={async () => {
                           try {
-                            const response = await fetch("/playback/metronome", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                              body: new URLSearchParams({
-                                bpm: String(rhythmInfo.tempo_bpm),
-                                time_signature: rhythmInfo.time_signature,
-                                duration_seconds: "30",
-                                accent_first: "true"
-                              })
+                            const params = new URLSearchParams({
+                              bpm: String(rhythmInfo.tempo_bpm),
+                              time_signature: rhythmInfo.time_signature,
+                              duration_seconds: "30",
+                              accent_first: "true"
                             });
+                            const response = await fetch(`/playback/metronome?${params}`, { method: "POST" });
                             if (response.ok) {
                               const blob = await response.blob();
                               const url = URL.createObjectURL(blob);
@@ -1355,15 +1359,15 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                 await audioElementRef.current.play();
                               }
                             } else {
-                              console.error("Metronome generation failed", await response.text());
+                              setErrorMessage(`Metronome generation failed: ${await response.text()}`);
                             }
                           } catch (err) {
-                            console.error(err);
+                            setErrorMessage(`Metronome error: ${err.message}`);
                           }
                         }}>
-                        ðŸŽµ Generate Metronome Track
+                        Generate Metronome Track
                       </button>
-                      
+
                       <div style={{marginTop:12, padding:8, background:"#1a1610", borderRadius:4}}>
                         <div style={{fontSize:11, color:"#a89060", marginBottom:4}}>Metronome Settings</div>
                         <div style={{fontSize:10, color:"#665040"}}>
@@ -1445,22 +1449,22 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               </div>
               {rhythmInfo && (
                 <button style={{...styles.profileBtn, marginTop:12, width:"100%", background:"#C9A84C22", color:"#C9A84C", border:"1px solid #C9A84C"}} onClick={() => setTempoPrompt(true)}>
-                  â™© Start Tempo Prompt
+                  Start Tempo Prompt
                 </button>
               )}
             </div>
           )}
         </div>
       </div>
-      
+
       {/* Hidden audio element for metronome */}
       <audio ref={audioElementRef} style={{display:"none"}}/>
     </div>
   );
 }
- 
-// â”€â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- 
+
+//  Styles
+
 const styles = {
   authBg: {
     minHeight:"100vh", background:"#111", display:"flex", alignItems:"center",
@@ -1614,6 +1618,14 @@ const styles = {
   alertBanner: {
     background:"#d4a574", color:"#1a1200", padding:"12px 16px", textAlign:"center",
     fontSize:13, fontWeight:700, position:"relative", zIndex:99,
+  },
+  errorBanner: {
+    background:"#351616", color:"#ffb3b3", padding:"10px 16px", display:"flex",
+    alignItems:"center", justifyContent:"space-between", gap:12, fontSize:13, zIndex:99,
+  },
+  errorDismiss: {
+    background:"transparent", border:"1px solid #8b4444", color:"#ffb3b3", borderRadius:6,
+    padding:"4px 8px", cursor:"pointer", fontSize:12,
   },
   tempoPrompter: {
     position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)",
