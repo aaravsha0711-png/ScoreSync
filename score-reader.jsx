@@ -1,437 +1,149 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useCallback } from "react";
  
-// ─── Constants ────────────────────────────────────────────────────────────────
- 
-const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
- 
-const MAJOR_SCALES = [
-  { name: "C Major", root: 0, notes: [0,2,4,5,7,9,11] },
-  { name: "G Major", root: 7, notes: [7,9,11,0,2,4,6] },
-  { name: "D Major", root: 2, notes: [2,4,6,7,9,11,1] },
-  { name: "A Major", root: 9, notes: [9,11,1,2,4,6,8] },
-  { name: "E Major", root: 4, notes: [4,6,8,9,11,1,3] },
-  { name: "B Major", root: 11, notes: [11,1,3,4,6,8,10] },
-  { name: "F# Major", root: 6, notes: [6,8,10,11,1,3,5] },
-  { name: "Db Major", root: 1, notes: [1,3,5,6,8,10,0] },
-  { name: "Ab Major", root: 8, notes: [8,10,0,1,3,5,7] },
-  { name: "Eb Major", root: 3, notes: [3,5,7,8,10,0,2] },
-  { name: "Bb Major", root: 10, notes: [10,0,2,3,5,7,9] },
-  { name: "F Major", root: 5, notes: [5,7,9,10,0,2,4] },
-];
- 
-const MEYER_SCALES = NOTE_NAMES.map((n, i) => [
-  { name: `${n} Meyer (v1)`, root: i, notes: [i,(i+2)%12,(i+4)%12,(i+6)%12,(i+7)%12,(i+9)%12,(i+11)%12] },
-  { name: `${n} Meyer (v2)`, root: i, notes: [i,(i+2)%12,(i+3)%12,(i+6)%12,(i+7)%12,(i+9)%12,(i+11)%12] },
-  { name: `${n} Meyer (v3)`, root: i, notes: [i,(i+2)%12,(i+4)%12,(i+6)%12,(i+8)%12,(i+9)%12,(i+11)%12] },
-]).flat();
- 
-// Transposition offsets in semitones (written→concert)
-const TRANSPOSITIONS = {
-  "Concert (C)": 0,
-  "Bb Trumpet": -2,
-  "Bb Clarinet": -2,
-  "Bb Tenor Sax": -14,
-  "Bb Soprano Sax": -2,
-  "Eb Alto Sax": 3,
-  "Eb Baritone Sax": -9,
-  "F Horn": -7,
-  "Eb Trumpet": 3,
-  "Bass Clarinet (Bb)": -14,
-  "Flute": 0,
-  "Oboe": 0,
-  "Bassoon": 0,
-  "Violin": 0,
-  "Viola": 0,
-  "Cello": 0,
-  "Double Bass": 0,
-  "Piano": 0,
-  "Guitar": 0,
-  "Tuba": 0,
-  "Trombone": 0,
-  "Euphonium": 0,
-};
- 
-// ─── Pitch Detection (YIN algorithm) ─────────────────────────────────────────
- 
-function yin(buffer, sampleRate) {
-  const W = buffer.length;
-  const half = Math.floor(W / 2);
-  const d = new Float32Array(half);
-  d[0] = 1;
-  let runSum = 0;
-  for (let tau = 1; tau < half; tau++) {
-    let s = 0;
-    for (let i = 0; i < half; i++) {
-      const diff = buffer[i] - buffer[i + tau];
-      s += diff * diff;
-    }
-    d[tau] = s;
-    runSum += s;
-    d[tau] = runSum === 0 ? 0 : (d[tau] * tau) / runSum;
+// Backend API helpers
+
+const MIN_NOTE_STABILITY_MS = 80;
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (response.status === 204) return null;
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = payload?.detail || payload?.message || response.statusText;
+    throw new Error(Array.isArray(message) ? message.map(m => m.msg || m).join(", ") : message);
   }
-  const threshold = 0.1;
-  for (let tau = 2; tau < half; tau++) {
-    if (d[tau] < threshold) {
-      while (tau + 1 < half && d[tau + 1] < d[tau]) tau++;
-      if (tau === 0) return -1;
-      const x0 = tau === 0 ? tau : tau - 1;
-      const x2 = tau + 1 < half ? tau + 1 : tau;
-      if (x0 === tau) return sampleRate / (d[tau] <= d[x2] ? tau : x2);
-      if (x2 === tau) return sampleRate / (d[tau] <= d[x0] ? tau : x0);
-      const s0 = d[x0], s1 = d[tau], s2 = d[x2];
-      const interp = tau + (s2 - s0) / (2 * (2 * s1 - s2 - s0));
-      return sampleRate / interp;
-    }
-  }
-  return -1;
-}
- 
-function freqToMidi(freq) {
-  if (freq <= 0) return null;
-  return Math.round(69 + 12 * Math.log2(freq / 440));
-}
- 
-function midiToNoteName(midi) {
-  return NOTE_NAMES[((midi % 12) + 12) % 12];
-}
- 
-function freqToNoteLabel(freq) {
-  const midi = freqToMidi(freq);
-  if (!midi) return null;
-  const octave = Math.floor(midi / 12) - 1;
-  return `${midiToNoteName(midi)}${octave}`;
-}
- 
-function centsDiff(freq, midi) {
-  if (!midi || freq <= 0) return 0;
-  const refFreq = 440 * Math.pow(2, (midi - 69) / 12);
-  return 1200 * Math.log2(freq / refFreq);
-}
- 
-// ─── Stylistic Marking Analyzer (local heuristic) ────────────────────────────
- 
-function analyzeMarkings(mxmlText) {
-  if (!mxmlText) return [];
-  const results = [];
-  const dynamics = mxmlText.match(/<dynamics[^>]*>[\s\S]*?<\/dynamics>/g) || [];
-  if (dynamics.length) results.push({ type: "Dynamics", count: dynamics.length, detail: "p, f, mf, etc." });
-  const slurs = (mxmlText.match(/<slur/g) || []).length;
-  if (slurs) results.push({ type: "Slurs/Phrases", count: slurs, detail: "Legato connections" });
-  const words = mxmlText.match(/<words[^>]*>([^<]+)<\/words>/g) || [];
-  if (words.length) results.push({ type: "Text Markings", count: words.length, detail: words.slice(0,3).map(w=>w.replace(/<[^>]+>/g,"")).join(", ") });
-  const tempo = mxmlText.match(/<metronome[\s\S]*?<\/metronome>/g) || [];
-  if (tempo.length) results.push({ type: "Tempo Marks", count: tempo.length, detail: "Metronome markings found" });
-  const hairpins = (mxmlText.match(/<wedge/g) || []).length;
-  if (hairpins) results.push({ type: "Hairpins", count: hairpins, detail: "Crescendo / Decrescendo" });
-  return results;
-}
- 
-function extractScoreNoteNames(mxmlText) {
-  const notes = new Set();
-  const pitchBlocks = mxmlText.match(/<pitch>[\s\S]*?<\/pitch>/g) || [];
-  for (const pitch of pitchBlocks) {
-    const step = pitch.match(/<step>([^<]+)<\/step>/);
-    const alter = pitch.match(/<alter>([^<]+)<\/alter>/);
-    if (step) {
-      let note = step[1];
-      if (alter) {
-        note += alter[1] === "1" ? "#" : alter[1] === "-1" ? "b" : "";
-      }
-      notes.add(note);
-    }
-  }
-  return Array.from(notes);
-}
- 
-function extractRestAlerts(mxmlText) {
-  const restAlerts = [];
-  const measureRegex = /<measure[^>]*number="([^\"]*)"[^>]*>([\s\S]*?)<\/measure>/g;
-  let match;
-  while ((match = measureRegex.exec(mxmlText))) {
-    const measureNumber = parseInt(match[1], 10) || null;
-    const body = match[2];
-    if (measureNumber && /<rest\b/.test(body)) {
-      restAlerts.push({ measure: measureNumber, restCount: (body.match(/<rest\b/g) || []).length });
-    }
-  }
-  return restAlerts;
+  return payload;
 }
 
-function computeRMS(buffer) {
-  let sum = 0;
-  for (let i = 0; i < buffer.length; i += 1) {
-    sum += buffer[i] * buffer[i];
-  }
-  return buffer.length > 0 ? Math.sqrt(sum / buffer.length) : 0;
-}
-
-function computeSpectralCentroid(magnitudeData, sampleRate) {
-  let weightedSum = 0;
-  let total = 0;
-  for (let i = 0; i < magnitudeData.length; i += 1) {
-    const magnitude = Math.max(0, magnitudeData[i]);
-    const frequency = (i * sampleRate) / (2 * magnitudeData.length);
-    weightedSum += frequency * magnitude;
-    total += magnitude;
-  }
-  return total > 0 ? weightedSum / total : 0;
-}
-
-function computeSpectralFlatness(magnitudeData) {
-  let geo = 1;
-  let arith = 0;
-  if (!magnitudeData || magnitudeData.length === 0) return 0;
-  for (let i = 0; i < magnitudeData.length; i += 1) {
-    const value = Math.max(1e-12, magnitudeData[i]);
-    geo *= value;
-    arith += value;
-  }
-  geo = Math.pow(geo, 1 / magnitudeData.length);
-  return geo / (arith / magnitudeData.length);
-}
-
-function detectVibratoFromHistory(freqHistory, sampleRate) {
-  if (!freqHistory || freqHistory.length < 8) return { rate: 0, depth: 0, hasVibrato: false };
-  const variation = freqHistory.filter(f => f > 0);
-  if (variation.length < 5) return { rate: 0, depth: 0, hasVibrato: false };
-  const avg = variation.reduce((sum, f) => sum + f, 0) / variation.length;
-  const cents = variation.map(f => 1200 * Math.log2(f / Math.max(avg, 1e-6)));
-  const variance = cents.reduce((sum, c) => sum + c * c, 0) / cents.length;
-  const std = Math.sqrt(variance);
-  let crossings = 0;
-  for (let i = 2; i < variation.length; i += 1) {
-    const prevDiff = variation[i - 1] - variation[i - 2];
-    const currDiff = variation[i] - variation[i - 1];
-    if (prevDiff * currDiff < 0) crossings += 1;
-  }
-  const durationSeconds = Math.max(0.001, (variation.length * 512) / sampleRate);
-  const rate = crossings / durationSeconds / 2;
-  const hasVibrato = rate >= 4 && rate <= 8 && std >= 15;
-  return { rate, depth: std, hasVibrato };
-}
-
-function inferPerformanceArticulation(metrics, complexMarkings, currentMeasure) {
-  const expected = complexMarkings
-    .filter(m => m.measure === currentMeasure && m.type === "articulation")
-    .map(m => m.detail);
-  const suggestions = [];
-  if (!metrics) return suggestions;
-
-  if (expected.includes("staccato") && metrics.noteCharacter === "legato") {
-    suggestions.push({ suggestion: "The score marks staccato here, but your tone sounds connected. Shorten the note release." });
-  }
-  if (expected.includes("tenuto") && metrics.noteCharacter === "staccato") {
-    suggestions.push({ suggestion: "This passage should feel held. Release less quickly for tenuto." });
-  }
-  if (expected.includes("accent") && metrics.noteCharacter === "plain") {
-    suggestions.push({ suggestion: "Accent markings are present but your attack is soft. Emphasize the onset." });
-  }
-  if (!expected.length && metrics.noteCharacter === "accent") {
-    suggestions.push({ suggestion: "Your strong attack suggests an accent. Consider adding an accent mark if it fits the phrase." });
-  }
-  if (metrics.hasVibrato && expected.includes("legato")) {
-    suggestions.push({ suggestion: "Your sustained note has a gentle vibrato; keep it consistent and expressive." });
-  }
-  if (!expected.includes("staccato") && metrics.noteCharacter === "staccato") {
-    suggestions.push({ suggestion: "Your phrasing is short and detached. If the score is not marked, match the style carefully." });
-  }
-  return suggestions;
-}
-
-function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings, metrics) {
-  const suggestions = [];
-  
-  // Check for dynamic markings
-  const hasDynamics = complexMarkings.some(m => m.type === "dynamics");
-  if (!hasDynamics && currentMeasure % 4 === 1) {
-    suggestions.push({
-      type: "dynamics",
-      suggestion: "Consider adding dynamic markings (p, f, mf) to indicate volume changes",
-      measure: currentMeasure
-    });
-  }
-  
-  // Check for articulation
-  const hasArticulation = complexMarkings.some(m => m.type === "articulation" && Math.abs(m.measure - currentMeasure) <= 2);
-  if (!hasArticulation && currentMeasure % 2 === 0) {
-    suggestions.push({
-      type: "articulation", 
-      suggestion: "Add staccato or legato markings to clarify note connection",
-      measure: currentMeasure
-    });
-  }
-  
-  // Check for tempo changes
-  const hasTempoChange = complexMarkings.some(m => m.type === "tempo");
-  if (!hasTempoChange && currentMeasure > 8 && currentMeasure % 8 === 0) {
-    suggestions.push({
-      type: "tempo",
-      suggestion: "Consider a ritardando or accelerando to add musical expression",
-      measure: currentMeasure
-    });
-  }
-
-  if (metrics) {
-    const perfSuggestions = inferPerformanceArticulation(metrics, complexMarkings, currentMeasure);
-    perfSuggestions.forEach(s => suggestions.push({ type: "performance", ...s, measure: currentMeasure }));
-
-    if (!hasDynamics && metrics.rmsLevel > 0.15) {
-      suggestions.push({
-        type: "dynamics",
-        suggestion: "Your playing already shows volume contrast. Mark dynamics in the score for clarity.",
-        measure: currentMeasure
-      });
-    }
-    if (metrics.hasVibrato && !metrics.noteCharacter) {
-      suggestions.push({
-        type: "vibrato",
-        suggestion: "Detected a pitch oscillation consistent with vibrato; shape it to match phrase context.",
-        measure: currentMeasure
-      });
-    }
-  }
-
-  return suggestions;
-}
-
-function startVoiceRecognition(onMeasureDetected, onWakeWordDetected) {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    alert('Speech recognition not supported in this browser');
-    return null;
-  }
-  
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const recognition = new SpeechRecognition();
-  
-  recognition.continuous = true;
-  recognition.interimResults = false;
-  recognition.lang = 'en-US';
-  
-  recognition.onresult = (event) => {
-    const last = event.results.length - 1;
-    const transcript = event.results[last][0].transcript.toLowerCase().trim();
-    
-    const numberMap = {
-      'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-      'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20
-    };
-
-    const numberMatcher = '(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
-    const wakeWordMatch = transcript.match(new RegExp(`${numberMatcher}\s+(?:resume|start|play|go)`, 'i'))
-      || transcript.match(new RegExp(`(?:resume|start|play|go)\s+${numberMatcher}`, 'i'));
-
-    if (wakeWordMatch) {
-      const numberWord = wakeWordMatch[1].toLowerCase();
-      const measureNumber = numberMap[numberWord] || parseInt(numberWord, 10);
-      if (measureNumber && measureNumber > 0) {
-        onWakeWordDetected(measureNumber);
-        return;
-      }
-    }
-
-    const measureMatch = transcript.match(new RegExp(`(?:measure|go to measure)\s+${numberMatcher}`, 'i'));
-    if (measureMatch) {
-      const numberWord = measureMatch[1].toLowerCase();
-      const measureNumber = numberMap[numberWord] || parseInt(numberWord, 10);
-      if (measureNumber && measureNumber > 0) {
-        onMeasureDetected(measureNumber);
-      }
-    }
+function normalizeProfile(profile) {
+  if (!profile) return { instrument: "Concert (C)", calibration: { skipped: true } };
+  return {
+    instrument: profile.instrument || "Concert (C)",
+    transposition: profile.transposition || 0,
+    calibration: profile.calibrated ? { saved: true } : { skipped: true },
   };
-  
-  recognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
-  };
-  
-  recognition.start();
-  return recognition;
 }
- 
-// ─── Mock DB (localStorage) ───────────────────────────────────────────────────
- 
-function dbGet(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } }
-function dbSet(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
- 
-function getUsers() { return dbGet("sr_users") || {}; }
-function saveUsers(u) { dbSet("sr_users", u); }
- 
-function getProfile(email) { return dbGet(`sr_profile_${email}`) || { instrument: "Concert (C)", calibration: null }; }
-function saveProfile(email, p) { dbSet(`sr_profile_${email}`, p); }
- 
-// ─── App ──────────────────────────────────────────────────────────────────────
+
+function scaleTypeForName(name) {
+  if (!name) return "major";
+  const lower = name.toLowerCase();
+  if (lower.includes("v1")) return "meyer_v1";
+  if (lower.includes("v2")) return "meyer_v2";
+  if (lower.includes("v3")) return "meyer_v3";
+  return "major";
+}
+
+function calibrationToRequest(calibration) {
+  return {
+    sessions: Object.entries(calibration || {})
+      .filter(([, value]) => value && !value.skipped)
+      .map(([scaleName, value]) => ({
+        scale_name: scaleName,
+        scale_type: scaleTypeForName(scaleName),
+        scale_root: 0,
+        notes: (value.detectedNotes || []).map((note_name, seq_index) => ({
+          note_name,
+          detected_freq: 0,
+          cents_deviation: 0,
+          seq_index,
+        })),
+      })),
+  };
+}
+
+// â”€â”€â”€ App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 export default function App() {
-  const [screen, setScreen] = useState("auth"); // auth | calibrate | main
+  const [screen, setScreen] = useState("auth");
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState({ email: "", password: "", name: "" });
   const [authError, setAuthError] = useState("");
- 
-  function handleLogin() {
-    const users = getUsers();
-    if (!users[authForm.email]) { setAuthError("No account found. Sign up first."); return; }
-    if (users[authForm.email].password !== authForm.password) { setAuthError("Wrong password."); return; }
-    const p = getProfile(authForm.email);
-    setUser({ email: authForm.email, name: users[authForm.email].name });
-    setProfile(p);
-    setScreen(p.calibration ? "main" : "instrument");
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiRequest("/auth/me")
+      .then(payload => {
+        if (cancelled) return;
+        setUser({ id: payload.id, email: payload.email, name: payload.name });
+        setProfile(normalizeProfile(payload.profile));
+        setScreen("main");
+      })
+      .catch(() => { if (!cancelled) setScreen("auth"); })
+      .finally(() => { if (!cancelled) setAuthLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleLogin() {
     setAuthError("");
+    try {
+      const payload = await apiRequest("/auth/login", { method: "POST", body: JSON.stringify({ email: authForm.email, password: authForm.password }) });
+      const me = await apiRequest("/auth/me").catch(() => ({ ...payload, id: payload.user_id, profile: null }));
+      setUser({ id: me.id || payload.user_id, email: me.email, name: me.name });
+      setProfile(normalizeProfile(me.profile));
+      setScreen("main");
+    } catch (err) {
+      setAuthError(err.message || "Sign in failed.");
+    }
   }
- 
-  function handleSignup() {
+
+  async function handleSignup() {
     if (!authForm.email || !authForm.password || !authForm.name) { setAuthError("All fields required."); return; }
-    const users = getUsers();
-    if (users[authForm.email]) { setAuthError("Email already registered."); return; }
-    users[authForm.email] = { name: authForm.name, password: authForm.password };
-    saveUsers(users);
-    const p = { instrument: "Concert (C)", calibration: null };
-    saveProfile(authForm.email, p);
-    setUser({ email: authForm.email, name: authForm.name });
-    setProfile(p);
-    setScreen("instrument");
     setAuthError("");
+    try {
+      const payload = await apiRequest("/auth/register", { method: "POST", body: JSON.stringify({ email: authForm.email, password: authForm.password, name: authForm.name }) });
+      setUser({ id: payload.user_id, email: payload.email, name: payload.name });
+      setProfile({ instrument: "Concert (C)", calibration: { skipped: true } });
+      setScreen("instrument");
+    } catch (err) {
+      setAuthError(err.message || "Account creation failed.");
+    }
   }
- 
-  function handleLogout() {
+
+  async function handleLogout() {
+    await apiRequest("/auth/logout", { method: "POST" }).catch(() => null);
     setUser(null); setProfile(null); setScreen("auth");
   }
- 
-  function handleInstrumentSave(instr) {
-    const p = { ...profile, instrument: instr };
-    saveProfile(user.email, p);
-    setProfile(p);
-    setScreen("calibrate");
+
+  async function handleInstrumentSave(instr) {
+    try {
+      await apiRequest("/profile/instrument", { method: "PUT", body: JSON.stringify({ instrument: instr }) });
+      setProfile(prev => ({ ...prev, instrument: instr, calibration: prev?.calibration || { skipped: true } }));
+      setScreen("main");
+    } catch (err) {
+      setAuthError(err.message || "Could not save instrument.");
+    }
   }
- 
-  function handleCalibrationDone(calibration) {
-    const p = { ...profile, calibration };
-    saveProfile(user.email, p);
-    setProfile(p);
+
+  async function handleCalibrationDone(calibration) {
+    const payload = calibrationToRequest(calibration);
+    if (payload.sessions.length) await apiRequest("/profile/calibration", { method: "POST", body: JSON.stringify(payload) }).catch(() => null);
+    setProfile(prev => ({ ...prev, calibration: payload.sessions.length ? { saved: true } : { skipped: true } }));
     setScreen("main");
   }
- 
+
   function handleSkipCalibration() {
-    const p = { ...profile, calibration: { skipped: true } };
-    saveProfile(user.email, p);
-    setProfile(p);
+    setProfile(prev => ({ ...prev, calibration: { skipped: true } }));
     setScreen("main");
   }
- 
+
+  if (authLoading) return <div style={styles.authBg}><div style={styles.authCard}><span style={styles.authBrand}>ScoreSync</span></div></div>;
   if (screen === "auth") return <AuthScreen mode={authMode} form={authForm} error={authError}
     onFormChange={f => setAuthForm(f)} onLogin={handleLogin} onSignup={handleSignup}
     onToggleMode={() => { setAuthMode(m => m === "login" ? "signup" : "login"); setAuthError(""); }} />;
- 
   if (screen === "instrument") return <InstrumentScreen onSave={handleInstrumentSave} />;
- 
-  if (screen === "calibrate") return <CalibrationScreen instrument={profile.instrument}
-    onDone={handleCalibrationDone} onSkip={handleSkipCalibration} />;
- 
-  return <MainScreen user={user} profile={profile}
-    onLogout={handleLogout} onRecalibrate={() => setScreen("calibrate")} />;
+  if (screen === "calibrate") return <CalibrationScreen instrument={profile.instrument} onDone={handleCalibrationDone} onSkip={handleSkipCalibration} />;
+  return <MainScreen user={user} profile={profile} onLogout={handleLogout} onRecalibrate={() => setScreen("calibrate")} />;
 }
- 
-// ─── Auth Screen ──────────────────────────────────────────────────────────────
+
+// â”€â”€â”€ Auth Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onToggleMode }) {
   const isLogin = mode === "login";
@@ -441,7 +153,7 @@ function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onTogg
         <div style={styles.authLogo}>
           <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#C9A84C"/>
-            <text x="20" y="26" textAnchor="middle" fontSize="18" fill="#1a1a1a" fontFamily="serif">♪</text>
+            <text x="20" y="26" textAnchor="middle" fontSize="18" fill="#1a1a1a" fontFamily="serif">â™ª</text>
           </svg>
           <span style={styles.authBrand}>ScoreSync</span>
         </div>
@@ -466,7 +178,7 @@ function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onTogg
   );
 }
  
-// ─── Instrument Screen ────────────────────────────────────────────────────────
+// â”€â”€â”€ Instrument Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 function InstrumentScreen({ onSave }) {
   const [selected, setSelected] = useState("Concert (C)");
@@ -489,18 +201,18 @@ function InstrumentScreen({ onSave }) {
         </div>
         {TRANSPOSITIONS[selected] !== 0 && (
           <div style={styles.transpBadge}>
-            ↕ Transposes {Math.abs(TRANSPOSITIONS[selected])} semitone{Math.abs(TRANSPOSITIONS[selected])!==1?"s":""} {TRANSPOSITIONS[selected]>0?"up":"down"} from concert
+            â†• Transposes {Math.abs(TRANSPOSITIONS[selected])} semitone{Math.abs(TRANSPOSITIONS[selected])!==1?"s":""} {TRANSPOSITIONS[selected]>0?"up":"down"} from concert
           </div>
         )}
         <button style={{...styles.authBtn, marginTop: 24}} onClick={() => onSave(selected)}>
-          Continue to Calibration →
+          Continue to Calibration â†’
         </button>
       </div>
     </div>
   );
 }
  
-// ─── Calibration Screen ─────────────────────────────────────────────────────
+// â”€â”€â”€ Calibration Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 function CalibrationScreen({ instrument, onDone, onSkip }) {
   const ALL_SCALES = [...MAJOR_SCALES, ...MEYER_SCALES];
@@ -598,9 +310,7 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
           <>
             <div style={styles.authLogo}><span style={styles.authBrand}>Microphone Calibration</span></div>
             <p style={styles.instrNote}>
-              You'll play through <strong>12 major scales</strong> and <strong>36 Meyer scale variations</strong> 
-              (all in concert pitch). This lets ScoreSync learn your tuning tendencies 
-              and playing style for accurate note tracking.
+              Calibration is optional. You can play a few scales now, or skip and let ScoreSync learn your tuning tendencies during practice.
             </p>
             <p style={{color:"#C9A84C", fontSize:13}}>
               All scales displayed in <strong>concert pitch</strong>. 
@@ -640,19 +350,19 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
                   <span style={styles.freqNote}>{freqToNoteLabel(currentFreq)}</span>
                 </>
               ) : (
-                <span style={{color:"#666"}}>Play the scale above ascending and descending…</span>
+                <span style={{color:"#666"}}>Play the scale above ascending and descendingâ€¦</span>
               )}
             </div>
  
             <div style={{display:"flex", gap:12, marginTop:20, justifyContent:"center"}}>
               {!isListening ? (
-                <button style={styles.authBtn} onClick={startMic}>🎙 Start Listening</button>
+                <button style={styles.authBtn} onClick={startMic}>ðŸŽ™ Start Listening</button>
               ) : (
                 <>
                   <button style={{...styles.authBtn, background:"#2a5"}} onClick={handleSaveAndNext}>
-                    ✓ Save & Next Scale
+                    âœ“ Save & Next Scale
                   </button>
-                  <button style={{...styles.authToggle}} onClick={stopMic}>⏹ Stop Mic</button>
+                  <button style={{...styles.authToggle}} onClick={stopMic}>â¹ Stop Mic</button>
                 </>
               )}
               <button style={styles.authToggle} onClick={onSkip}>Skip calibration</button>
@@ -664,7 +374,7 @@ function CalibrationScreen({ instrument, onDone, onSkip }) {
   );
 }
  
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [score, setScore] = useState(null);
@@ -723,6 +433,55 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [releaseMs, setReleaseMs] = useState(0);
   const [vibratoStrength, setVibratoStrength] = useState(0);
   const [performanceArticulation, setPerformanceArticulation] = useState("");
+  const getOsmdMeasureIndex = useCallback(() => {
+    const iterator = osmdRef.current?.cursor?.iterator;
+    const raw = iterator?.CurrentMeasureIndex ?? iterator?.currentMeasureIndex;
+    return Number.isFinite(raw) ? raw : currentMeasure - 1;
+  }, [currentMeasure]);
+
+  const scrollToOsmdCursor = useCallback(() => {
+    const container = scoreContainerRef.current;
+    const cursorElement = osmdRef.current?.cursor?.cursorElement;
+    if (!container || !cursorElement) return false;
+    const top = cursorElement.offsetTop || cursorElement.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    container.scrollTo({ top: Math.max(0, top - container.clientHeight * 0.25), behavior: "smooth" });
+    return true;
+  }, []);
+
+  const scrollToMeasure = useCallback((measureNumber) => {
+    const osmd = osmdRef.current;
+    if (!osmd || !scoreContainerRef.current) return;
+    const cursor = osmd.cursor;
+    try {
+      cursor?.reset?.();
+      cursor?.show?.();
+      const targetIndex = Math.max(0, measureNumber - 1);
+      let guard = 0;
+      while ((cursor?.iterator?.CurrentMeasureIndex ?? 0) < targetIndex && guard < 2048) {
+        cursor.next();
+        guard += 1;
+      }
+      scrollToOsmdCursor();
+      setCurrentMeasure((cursor?.iterator?.CurrentMeasureIndex ?? targetIndex) + 1);
+    } catch {
+      scrollToOsmdCursor();
+    }
+  }, [scrollToOsmdCursor]);
+
+  const advanceOsmdCursor = useCallback(() => {
+    const cursor = osmdRef.current?.cursor;
+    if (!cursor) return;
+    try {
+      cursor.show?.();
+      cursor.next();
+      const measureIndex = cursor.iterator?.CurrentMeasureIndex ?? cursor.iterator?.currentMeasureIndex;
+      if (Number.isFinite(measureIndex)) setCurrentMeasure(measureIndex + 1);
+      scrollToOsmdCursor();
+    } catch {
+      scrollToOsmdCursor();
+    }
+  }, [scrollToOsmdCursor]);
+
   const [settings, setSettings] = useState({
     stopAtWrongNote: true,
     loopOnWrongNote: false,
@@ -766,6 +525,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       osmdRef.current = osmd;
       osmd.load(score).then(() => {
         osmd.render();
+        osmd.cursor?.show?.();
       }).catch(e => setOsmdError("Could not render score: " + e.message));
     } catch(e) {
       setOsmdError("Score render error: " + e.message);
@@ -919,13 +679,13 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         setCurrentMeasure(targetMeasure);
         setIsAutoScrollPaused(false);
         if (scoreContainerRef.current) {
-          scoreContainerRef.current.scrollTop = (targetMeasure - 1) * 100;
+          scrollToMeasure(targetMeasure);
         }
         setWakeWordNotice(null);
       }
     }, interval);
     wakeCountdownTimerRef.current = timer;
-  }, [rhythmInfo]);
+  }, [rhythmInfo, scrollToMeasure]);
 
   useEffect(() => {
     if (settings.metronomeEnabled && rhythmInfo) {
@@ -945,7 +705,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         setCurrentMeasure(targetMeasure);
         setIsAutoScrollPaused(false);
         if (scoreContainerRef.current) {
-          scoreContainerRef.current.scrollTop = (targetMeasure - 1) * 100;
+          scrollToMeasure(targetMeasure);
         }
       }, (measureNumber) => {
         beginWakeWordResume(measureNumber);
@@ -963,7 +723,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         recognition.stop();
       }
     };
-  }, [settings.voiceMeasureJumpEnabled, isListening, beginWakeWordResume]);
+  }, [settings.voiceMeasureJumpEnabled, isListening, beginWakeWordResume, scrollToMeasure]);
 
   // Update metronome BPM when rhythm info changes
   useEffect(() => {
@@ -1040,21 +800,28 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       const freq = yin(bufRef.current, audioCtxRef.current.sampleRate);
       const now = Date.now();
       if (freq > 40 && freq < 4200) {
-        setCurrentFreq(freq);
         const midi = freqToMidi(freq);
-        setCurrentMidi(midi);
         const noteLabel = freqToNoteLabel(freq);
-        setCurrentNote(noteLabel);
-        setCents(centsDiff(freq, midi));
-        const entry = { freq, note: noteLabel, time: now };
-        noteHistoryRef.current = [...noteHistoryRef.current.slice(-49), entry];
-        setNoteHistory([...noteHistoryRef.current]);
-
         if (previousNoteRef.current !== noteLabel) {
           noteStableSinceRef.current = now;
           previousNoteRef.current = noteLabel;
         }
         const sustainMs = noteStableSinceRef.current ? now - noteStableSinceRef.current : 0;
+        if (sustainMs < MIN_NOTE_STABILITY_MS) {
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
+        setCurrentFreq(freq);
+        setCurrentMidi(midi);
+        setCurrentNote(noteLabel);
+        setCents(centsDiff(freq, midi));
+        const lastEntry = noteHistoryRef.current[noteHistoryRef.current.length - 1];
+        const entry = { freq, note: noteLabel, time: now };
+        if (!lastEntry || lastEntry.note !== noteLabel || now - lastEntry.time > MIN_NOTE_STABILITY_MS) {
+          noteHistoryRef.current = [...noteHistoryRef.current.slice(-49), entry];
+          setNoteHistory([...noteHistoryRef.current]);
+          advanceOsmdCursor();
+        }
 
         const freqHistory = [...freqHistoryRef.current.slice(-49), freq];
         freqHistoryRef.current = freqHistory;
@@ -1082,7 +849,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         setPerformanceArticulation(noteCharacter);
 
         if (settings.restAlertEnabled && restAlerts.length > 0 && rhythmInfo) {
-          const currentMeasureEstimate = Math.max(1, Math.ceil(noteHistoryRef.current.length * (rhythmInfo.tempo_bpm || 120) / 60));
+          const currentMeasureEstimate = getOsmdMeasureIndex() + 1;
           setCurrentMeasure(currentMeasureEstimate);
           const upcomingRestMeasure = restAlerts.find(r => r.measure > currentMeasureEstimate && r.measure <= currentMeasureEstimate + settings.restAlertAdvance);
           if (upcomingRestMeasure) {
@@ -1102,22 +869,20 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isListening, settings, restAlerts, rhythmInfo]);
+  }, [isListening, settings, restAlerts, rhythmInfo, advanceOsmdCursor, getOsmdMeasureIndex]);
  
   useEffect(() => {
     if (!autoScroll || !isListening || !scoreContainerRef.current) return;
     const id = setInterval(() => {
-      if (isAutoScrollPaused) {
-        return; // Don't scroll if paused
-      }
+      if (isAutoScrollPaused) return;
       if (currentFreq > 0) {
-        scoreContainerRef.current.scrollTop += 0.4;
+        scrollToOsmdCursor();
       } else if (settings.pauseOnSilence) {
-        setIsAutoScrollPaused(true); // Pause on silence
+        setIsAutoScrollPaused(true);
       }
-    }, 50);
+    }, 120);
     return () => clearInterval(id);
-  }, [autoScroll, isListening, currentFreq, isAutoScrollPaused, settings.pauseOnSilence]);
+  }, [autoScroll, isListening, currentFreq, isAutoScrollPaused, settings.pauseOnSilence, scrollToOsmdCursor]);
  
   const tunerColor = Math.abs(cents) < 10 ? "#2aee6e" : Math.abs(cents) < 25 ? "#f5c542" : "#ee4444";
   const tunerOffset = Math.max(-50, Math.min(50, cents));
@@ -1128,18 +893,18 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         <div style={styles.topBrand}>
           <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#C9A84C"/>
-            <text x="20" y="27" textAnchor="middle" fontSize="20" fill="#1a1a1a" fontFamily="serif">♪</text>
+            <text x="20" y="27" textAnchor="middle" fontSize="20" fill="#1a1a1a" fontFamily="serif">â™ª</text>
           </svg>
           <span style={styles.topBrandName}>ScoreSync</span>
         </div>
         <div style={styles.topControls}>
           <label style={styles.uploadBtn}>
-            📂 Load Score
+            ðŸ“‚ Load Score
             <input type="file" accept=".pdf,.xml,.musicxml,.mxl,.mscz,.mscx" style={{display:"none"}} onChange={handleFileLoad}/>
           </label>
           <button style={{...styles.micBtn, ...(isListening ? styles.micBtnActive : {})}}
             onClick={isListening ? stopMic : startMic}>
-            {isListening ? "🔴 Stop Mic" : "🎙 Start Mic"}
+            {isListening ? "ðŸ”´ Stop Mic" : "ðŸŽ™ Start Mic"}
           </button>
           <label style={styles.topToggle}>
             <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} style={{marginRight:6}}/>
@@ -1147,21 +912,21 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           </label>
           {isAutoScrollPaused && (
             <button style={{...styles.micBtn, background:"#2a5", border:"1px solid #4a9"}} onClick={() => setIsAutoScrollPaused(false)}>
-              ▶ Resume
+              â–¶ Resume
             </button>
           )}
           {loopMode !== "none" && (
             <span style={{fontSize:11, color:"#C9A84C", padding:"4px 8px", background:"#2a2010", borderRadius:4}}>
-              🔄 {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
+              ðŸ”„ {loopMode === "measure" ? "Measure Loop" : "Phrase Loop"}
             </span>
           )}
           <button style={{...styles.micBtn, ...(stickyNoteMode ? {background:"#C9A84C", color:"#1a1200"} : {})}}
             onClick={() => setStickyNoteMode(!stickyNoteMode)}>
-            📌 {stickyNoteMode ? "Exit Notes" : "Sticky Notes"}
+            ðŸ“Œ {stickyNoteMode ? "Exit Notes" : "Sticky Notes"}
           </button>
           {voiceRecognitionActive && (
             <span style={{fontSize:11, color:"#2aee6e", padding:"4px 8px", background:"#1a2a1a", borderRadius:4}}>
-              🎤 Voice Active
+              ðŸŽ¤ Voice Active
             </span>
           )}
           <div style={styles.userBadge} onClick={() => setShowProfile(p => !p)}>
@@ -1175,7 +940,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
         <div style={styles.profileDrop}>
           <div style={styles.profileItem}><strong>{user.name}</strong></div>
           <div style={styles.profileItem}>{user.email}</div>
-          <div style={styles.profileItem}>🎺 {profile.instrument}</div>
+          <div style={styles.profileItem}>ðŸŽº {profile.instrument}</div>
           <button style={styles.profileBtn} onClick={onRecalibrate}>Recalibrate</button>
           <button style={{...styles.profileBtn, color:"#ee4444"}} onClick={onLogout}>Sign Out</button>
         </div>
@@ -1184,7 +949,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       {/* Rest Alert Notification */}
       {currentRestAlert && settings.restAlertEnabled && (
         <div style={{...styles.alertBanner}}>
-          ⏰ Rest Alert: Measure {currentRestAlert.measure} in {currentRestAlert.beatsUntil.toFixed(1)} beat(s)
+          â° Rest Alert: Measure {currentRestAlert.measure} in {currentRestAlert.beatsUntil.toFixed(1)} beat(s)
         </div>
       )}
       
@@ -1195,10 +960,10 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           <div style={styles.tempoSubtitle}>{rhythmInfo.time_signature}</div>
           <div style={{display:"flex", gap:8, marginTop:12, justifyContent:"center"}}>
             <button style={styles.tempoBtn} onClick={startMetronome}>
-              {metronomeState.isPlaying ? "🔴 Stop" : "▶ Play Metronome"}
+              {metronomeState.isPlaying ? "ðŸ”´ Stop" : "â–¶ Play Metronome"}
             </button>
             <button style={{...styles.tempoBtn, background:"#1e1a14"}} onClick={() => setTempoPrompt(false)}>
-              ✓ Ready
+              âœ“ Ready
             </button>
           </div>
         </div>
@@ -1210,7 +975,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           {settings.restAlertEnabled && currentRestAlert && (
             <div style={{...styles.restAlertBanner, background: currentRestAlert.isCritical ? "#8b2e2e" : "#3a3824"}}>
               <div style={{fontSize:14, fontWeight:700, color: currentRestAlert.isCritical ? "#ff6b6b" : "#C9A84C"}}>
-                ⚠ REST ALERT - Measure {currentRestAlert.measure}
+                âš  REST ALERT - Measure {currentRestAlert.measure}
               </div>
               <div style={{fontSize:12, color: currentRestAlert.isCritical ? "#ffb3b3" : "#d4af9f", marginTop:4}}>
                 {currentRestAlert.isCritical ? "REST ENDS IN 1 BEAT" : `Rest in ${currentRestAlert.beatsUntil.toFixed(1)} beats`}
@@ -1222,11 +987,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
           {settings.markingSuggestionsEnabled && markingSuggestions.length > 0 && (
             <div style={styles.markingSuggestionsBanner}>
               <div style={{fontSize:14, fontWeight:700, color:"#C9A84C", marginBottom:4}}>
-                💡 Performance Enhancement Suggestions
+                ðŸ’¡ Performance Enhancement Suggestions
               </div>
               {markingSuggestions.slice(0,2).map((suggestion, i) => (
                 <div key={i} style={{fontSize:12, color:"#d4af9f", marginBottom:2}}>
-                  • {suggestion.suggestion}
+                  â€¢ {suggestion.suggestion}
                 </div>
               ))}
               {performanceArticulation && (
@@ -1293,13 +1058,13 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               onClick={handleStickyNoteClick}
             >
               <div style={styles.stickyNoteModeHint}>
-                📌 Click anywhere on the score to add a sticky note
+                ðŸ“Œ Click anywhere on the score to add a sticky note
               </div>
             </div>
           )}
           {!score ? (
             <div style={styles.scorePlaceholder}>
-              <div style={styles.placeholderIcon}>𝄞</div>
+              <div style={styles.placeholderIcon}>ð„ž</div>
               <div style={styles.placeholderText}>Load a score to begin</div>
               <div style={styles.placeholderSub}>Supports PDF, MusicXML (.xml, .mxl, .musicxml)<br/>MuseScore files require server-side conversion</div>
             </div>
@@ -1312,7 +1077,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
             </>
           ) : (
             <div style={styles.scorePlaceholder}>
-              <div style={styles.placeholderIcon}>⚙️</div>
+              <div style={styles.placeholderIcon}>âš™ï¸</div>
               <div style={styles.placeholderText}>MuseScore file detected</div>
               <div style={styles.placeholderSub}>MuseScore (.mscz) files require server-side<br/>conversion via MuseScore CLI. Connect a backend<br/>to enable this.</div>
             </div>
@@ -1331,12 +1096,12 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   <div style={styles.tunerCenter}/>
                 </div>
                 <div style={{...styles.centsLabel, color: tunerColor}}>
-                  {cents > 0 ? "+" : ""}{cents.toFixed(1)}¢
+                  {cents > 0 ? "+" : ""}{cents.toFixed(1)}Â¢
                 </div>
               </>
             ) : (
               <div style={styles.pitchIdle}>
-                {isListening ? "Listening…" : "Start mic to detect pitch"}
+                {isListening ? "Listeningâ€¦" : "Start mic to detect pitch"}
               </div>
             )}
           </div>
@@ -1367,7 +1132,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               ) : markings.map((m,i) => (
                 <div key={i} style={styles.markingItem}>
                   <span style={styles.markingType}>{m.type}</span>
-                  <span style={styles.markingCount}>×{m.count}</span>
+                  <span style={styles.markingCount}>Ã—{m.count}</span>
                   <span style={styles.markingDetail}>{m.detail}</span>
                 </div>
               ))}
@@ -1420,7 +1185,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                   {trainingMode && rhythmInfo && (
                     <>
                       <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
-                        ♪ Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
+                        â™ª Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}<br/>
                         Notes: {rhythmInfo.note_count} | Rests: {rhythmInfo.rest_count}<br/>
                         Current Measure: {currentMeasure}
                       </div>
@@ -1457,7 +1222,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                 setLoadingSynthesis(false);
                               }
                             }}>
-                            {loadingSynthesis ? "⏳ Synthesizing..." : "🎵 Synth Track"}
+                            {loadingSynthesis ? "â³ Synthesizing..." : "ðŸŽµ Synth Track"}
                           </button>
                           <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
                             onClick={() => {
@@ -1466,7 +1231,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                 audioElementRef.current.currentTime = 0;
                               }
                             }}>
-                            ⏹ Stop
+                            â¹ Stop
                           </button>
                         </div>
                       </div>
@@ -1490,7 +1255,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                             setErrorMessage(`Segment error: ${err.message}`);
                           }
                         }}>
-                        📊 Extract Segments
+                        ðŸ“Š Extract Segments
                       </button>
                       
                       {trainingSegments.length > 0 && (
@@ -1503,13 +1268,12 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                                   // Jump to segment start
                                   setCurrentMeasure(segment.start_measure);
                                   if (scoreContainerRef.current) {
-                                    const scrollAmount = (segment.start_measure - 1) * 120; // Rough estimate
-                                    scoreContainerRef.current.scrollTop = scrollAmount;
+                                    scrollToMeasure(segment.start_measure);
                                   }
                                 }}>
-                                <div style={{fontWeight:700}}>Segment {segment.segment_id}: M{segment.start_measure}–{segment.end_measure}</div>
+                                <div style={{fontWeight:700}}>Segment {segment.segment_id}: M{segment.start_measure}â€“{segment.end_measure}</div>
                                 <div style={{fontSize:11, color:"#8e7b55", marginTop:2}}>
-                                  {segment.measure_count} measures • rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
+                                  {segment.measure_count} measures â€¢ rests: {segment.markings.hasRests ? "yes" : "no"}, accents: {segment.markings.hasAccents ? "yes" : "no"}
                                 </div>
                               </div>
                             ))}
@@ -1544,7 +1308,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               ) : (
                 <>
                   <div style={{fontSize:11, color:"#665040", marginTop:8, padding:8, background:"#1a1610", borderRadius:4}}>
-                    ♪ Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}
+                    â™ª Tempo: {rhythmInfo.tempo_bpm} BPM | Time: {rhythmInfo.time_signature}
                   </div>
                   
                   <div style={styles.settingRow}>
@@ -1561,11 +1325,11 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                         <div style={{display:"flex", gap:6, marginBottom:8}}>
                           <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#2a5"}} 
                             onClick={startMetronome}>
-                            ▶️ Start
+                            â–¶ï¸ Start
                           </button>
                           <button style={{...styles.profileBtn, flex:1, fontSize:11, background:"#a52"}} 
                             onClick={stopMetronome}>
-                            ⏹ Stop
+                            â¹ Stop
                           </button>
                         </div>
                       </div>
@@ -1597,7 +1361,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
                             console.error(err);
                           }
                         }}>
-                        🎵 Generate Metronome Track
+                        ðŸŽµ Generate Metronome Track
                       </button>
                       
                       <div style={{marginTop:12, padding:8, background:"#1a1610", borderRadius:4}}>
@@ -1681,7 +1445,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               </div>
               {rhythmInfo && (
                 <button style={{...styles.profileBtn, marginTop:12, width:"100%", background:"#C9A84C22", color:"#C9A84C", border:"1px solid #C9A84C"}} onClick={() => setTempoPrompt(true)}>
-                  ♩ Start Tempo Prompt
+                  â™© Start Tempo Prompt
                 </button>
               )}
             </div>
@@ -1695,7 +1459,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   );
 }
  
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  
 const styles = {
   authBg: {
@@ -1893,3 +1657,4 @@ const styles = {
     fontSize:12, fontWeight:700, boxShadow:"0 4px 16px rgba(0,0,0,0.4)",
   },
 };
+

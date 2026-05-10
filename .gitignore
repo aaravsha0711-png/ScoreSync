@@ -1,0 +1,12 @@
+﻿__pycache__/
+*.pyc
+.venv/
+.env
+scoresync.db
+scoresync.db-*
+uploads/
+node_modules/
+static/dist/
+npm-debug.log*
+.DS_Store
+.codex_deps/

@@ -1,68 +1,106 @@
 """
-db/database.py
-SQLite persistence layer for ScoreSync.
-Tables: users, profiles, calibration_sessions, calibration_notes
+database.py
+PostgreSQL persistence for ScoreSync, with SQLite fallback for local development.
 """
+from __future__ import annotations
 
-import sqlite3
 import os
+import sqlite3
 from pathlib import Path
+from typing import Any
 
-DB_PATH = Path(os.environ.get("SCORESYNC_DB", "scoresync.db"))
+DATABASE_URL = os.environ.get("DATABASE_URL")
+SQLITE_PATH = Path(os.environ.get("SCORESYNC_DB", "scoresync.db"))
 
 
-def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+class PgRow(dict):
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class PgCursor:
+    def __init__(self, cursor, lastrowid=None):
+        self._cursor = cursor
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return PgRow(row) if row else None
+
+    def fetchall(self):
+        return [PgRow(row) for row in self._cursor.fetchall()]
+
+
+class PgConnection:
+    def __init__(self):
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        self._conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type:
+            self._conn.rollback()
+        else:
+            self._conn.commit()
+        self._conn.close()
+
+    def execute(self, query, params=()):
+        sql = query.replace("?", "%s").replace("datetime('now')", "CURRENT_TIMESTAMP")
+        wants_id = _insert_needs_returning_id(sql)
+        if wants_id:
+            sql = f"{sql.rstrip()} RETURNING id"
+        cur = self._conn.cursor()
+        cur.execute(sql, params)
+        lastrowid = None
+        if wants_id:
+            row = cur.fetchone()
+            lastrowid = row["id"] if row else None
+        return PgCursor(cur, lastrowid)
+
+    def executescript(self, script):
+        cur = self._conn.cursor()
+        cur.execute(script)
+        return PgCursor(cur)
+
+
+def _insert_needs_returning_id(sql):
+    compact = " ".join(sql.lower().split())
+    return (compact.startswith("insert into users ") or compact.startswith("insert into calibration_sessions ")) and " returning " not in compact
+
+
+def _sqlite_conn():
+    conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db() -> None:
-    """Create all tables on first run."""
+def get_conn():
+    return PgConnection() if DATABASE_URL else _sqlite_conn()
+
+
+def init_db():
+    if DATABASE_URL:
+        with get_conn() as conn:
+            conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, hashed_pw TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS profiles (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, instrument TEXT NOT NULL DEFAULT 'Concert (C)', transposition INTEGER NOT NULL DEFAULT 0, calibrated INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS calibration_sessions (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, scale_name TEXT NOT NULL, scale_type TEXT NOT NULL, scale_root INTEGER NOT NULL, completed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS calibration_notes (id SERIAL PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE, note_name TEXT NOT NULL, detected_freq DOUBLE PRECISION NOT NULL, cents_deviation DOUBLE PRECISION NOT NULL DEFAULT 0.0, seq_index INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS score_uploads (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, filename TEXT NOT NULL, file_type TEXT NOT NULL, stored_path TEXT NOT NULL, uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            """)
+        return
     with get_conn() as conn:
         conn.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            email       TEXT    UNIQUE NOT NULL,
-            name        TEXT    NOT NULL,
-            hashed_pw   TEXT    NOT NULL,
-            created_at  TEXT    DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS profiles (
-            user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-            instrument      TEXT    NOT NULL DEFAULT 'Concert (C)',
-            transposition   INTEGER NOT NULL DEFAULT 0,
-            calibrated      INTEGER NOT NULL DEFAULT 0,
-            updated_at      TEXT    DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS calibration_sessions (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            scale_name  TEXT    NOT NULL,
-            scale_type  TEXT    NOT NULL,   -- 'major' | 'meyer_v1' | 'meyer_v2' | 'meyer_v3'
-            scale_root  INTEGER NOT NULL,   -- 0-11 pitch class
-            completed_at TEXT   DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS calibration_notes (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id      INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE,
-            note_name       TEXT    NOT NULL,
-            detected_freq   REAL    NOT NULL,
-            cents_deviation REAL    NOT NULL DEFAULT 0.0,
-            seq_index       INTEGER NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS score_uploads (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            filename    TEXT    NOT NULL,
-            file_type   TEXT    NOT NULL,  -- 'pdf' | 'musicxml' | 'musescore'
-            stored_path TEXT    NOT NULL,
-            uploaded_at TEXT    DEFAULT (datetime('now'))
-        );
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, hashed_pw TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')));
+        CREATE TABLE IF NOT EXISTS profiles (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, instrument TEXT NOT NULL DEFAULT 'Concert (C)', transposition INTEGER NOT NULL DEFAULT 0, calibrated INTEGER NOT NULL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')));
+        CREATE TABLE IF NOT EXISTS calibration_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, scale_name TEXT NOT NULL, scale_type TEXT NOT NULL, scale_root INTEGER NOT NULL, completed_at TEXT DEFAULT (datetime('now')));
+        CREATE TABLE IF NOT EXISTS calibration_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE, note_name TEXT NOT NULL, detected_freq REAL NOT NULL, cents_deviation REAL NOT NULL DEFAULT 0.0, seq_index INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS score_uploads (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, filename TEXT NOT NULL, file_type TEXT NOT NULL, stored_path TEXT NOT NULL, uploaded_at TEXT DEFAULT (datetime('now')));
         """)

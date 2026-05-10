@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: scoresync
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      npm install
+      npm run build
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SCORESYNC_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: scoresync-db
+          property: connectionString
+
+databases:
+  - name: scoresync-db
+    plan: free

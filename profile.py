@@ -14,9 +14,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from core.deps import get_current_user
-from core.transposition import TRANSPOSITION_MAP, semitones_for
-from db.database import get_conn
+from deps import get_current_user
+from transposition import TRANSPOSITION_MAP, semitones_for
+from database import get_conn
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 

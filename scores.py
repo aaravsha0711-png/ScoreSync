@@ -21,39 +21,68 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response
 
-from core.deps import get_current_user
-from core.transposition import transpose_musicxml, semitones_for
+from deps import get_current_user
+from transposition import transpose_musicxml, semitones_for
 from stylistic import analyze_musicxml, analyze_audio_performance, load_audio_bytes
-from analysis.musescore_converter import (
+from musescore_converter import (
     convert_to_musicxml,
     convert_to_pdf,
     is_available as musescore_available,
     MuseScoreNotInstalled,
     ConversionError,
 )
-from db.database import get_conn
+from database import get_conn
 
 router = APIRouter(prefix="/scores", tags=["scores"])
 
 UPLOAD_DIR = Path(os.environ.get("SCORESYNC_UPLOAD_DIR", "uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+USE_OBJECT_STORAGE = bool(os.environ.get("S3_BUCKET"))
+if not USE_OBJECT_STORAGE:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _object_storage_client():
+    if not USE_OBJECT_STORAGE:
+        return None
+    import boto3
+    kwargs = {
+        "aws_access_key_id": os.environ.get("S3_ACCESS_KEY_ID"),
+        "aws_secret_access_key": os.environ.get("S3_SECRET_ACCESS_KEY"),
+        "region_name": os.environ.get("S3_REGION", "auto"),
+    }
+    endpoint = os.environ.get("S3_ENDPOINT_URL")
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+    return boto3.client("s3", **kwargs)
+
+
 def _save_upload(user_id, filename, file_type, data):
     ext = Path(filename).suffix.lower()
     stored_name = "{}_{}{}".format(user_id, uuid.uuid4().hex, ext)
-    stored_path = UPLOAD_DIR / stored_name
-    stored_path.write_bytes(data)
+    if USE_OBJECT_STORAGE:
+        bucket = os.environ["S3_BUCKET"]
+        key = "uploads/{}".format(stored_name)
+        _object_storage_client().put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=data,
+            ContentType="application/octet-stream",
+        )
+        stored_path = "s3://{}/{}".format(bucket, key)
+    else:
+        stored_path_obj = UPLOAD_DIR / stored_name
+        stored_path_obj.write_bytes(data)
+        stored_path = str(stored_path_obj)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO score_uploads (user_id, filename, file_type, stored_path) VALUES (?,?,?,?)",
-            (user_id, filename, file_type, str(stored_path)),
+            (user_id, filename, file_type, stored_path),
         )
-    return str(stored_path)
+    return stored_path
 
 
 def _detect_type(filename: str) -> str:
@@ -66,6 +95,88 @@ def _detect_type(filename: str) -> str:
         ".mscz": "musescore",
         ".mscx": "musescore",
     }.get(ext, "unknown")
+
+
+STEP_TO_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+
+def _midi_to_frequency(midi_note):
+    return 440.0 * (2 ** ((midi_note - 69) / 12))
+
+
+def _extract_musicxml_notes(xml_bytes, tempo_override=None):
+    try:
+        from music21 import converter, note as m21_note, chord as m21_chord, tempo as m21_tempo
+        score = converter.parseData(xml_bytes)
+        mark = score.metronomeMarkBoundaries()
+        bpm = tempo_override or 120
+        if mark:
+            mm = mark[0][2]
+            if getattr(mm, "number", None):
+                bpm = int(mm.number)
+        notes = []
+        for element in score.flatten().notesAndRests:
+            seconds = max(0.08, float(element.quarterLength) * 60.0 / bpm)
+            if isinstance(element, m21_note.Rest):
+                notes.append({"frequencies": [], "seconds": seconds})
+            elif isinstance(element, m21_chord.Chord):
+                notes.append({"frequencies": [p.frequency for p in element.pitches if p.frequency], "seconds": seconds})
+            elif isinstance(element, m21_note.Note) and element.pitch.frequency:
+                notes.append({"frequencies": [element.pitch.frequency], "seconds": seconds})
+        if notes:
+            return notes
+    except Exception:
+        pass
+
+    text = xml_bytes.decode("utf-8", errors="ignore")
+    tempo_match = re.search(r"<metronome>[\s\S]*?<per-minute>(\d+)</per-minute>", text)
+    bpm = tempo_override or (int(tempo_match.group(1)) if tempo_match else 120)
+    divisions_match = re.search(r"<divisions>(\d+)</divisions>", text)
+    divisions = int(divisions_match.group(1)) if divisions_match else 1
+    notes = []
+    for note_match in re.finditer(r"<note\b[^>]*>([\s\S]*?)</note>", text):
+        body = note_match.group(1)
+        duration_units = int((re.search(r"<duration>(\d+)</duration>", body) or [None, divisions])[1])
+        seconds = max(0.08, (duration_units / divisions) * 60.0 / bpm)
+        if "<rest" in body:
+            notes.append({"frequencies": [], "seconds": seconds})
+            continue
+        step = (re.search(r"<step>([A-G])</step>", body) or [None, None])[1]
+        octave = (re.search(r"<octave>(\d+)</octave>", body) or [None, None])[1]
+        alter = int((re.search(r"<alter>(-?\d+)</alter>", body) or [None, 0])[1])
+        if not step or octave is None:
+            continue
+        midi = (int(octave) + 1) * 12 + STEP_TO_SEMITONE[step] + alter
+        notes.append({"frequencies": [_midi_to_frequency(midi)], "seconds": seconds})
+    return notes
+
+
+def _synthesize_notes_to_wav(note_events, sample_rate=44100):
+    samples = []
+    for event in note_events:
+        frames = max(1, int(event["seconds"] * sample_rate))
+        frequencies = event["frequencies"]
+        for i in range(frames):
+            if not frequencies:
+                samples.append(0.0)
+                continue
+            t = i / sample_rate
+            envelope = min(1.0, i / max(1, int(0.012 * sample_rate)))
+            release_start = int(frames * 0.88)
+            if i > release_start:
+                envelope *= max(0.0, (frames - i) / max(1, frames - release_start))
+            sample = sum(math.sin(2 * math.pi * freq * t) for freq in frequencies) / len(frequencies)
+            samples.append(0.28 * envelope * sample)
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        pcm = bytearray()
+        for sample in samples:
+            pcm.extend(struct.pack("<h", int(max(-1.0, min(1.0, sample)) * 32767)))
+        wav.writeframes(bytes(pcm))
+    return wav_buffer.getvalue()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -267,7 +378,7 @@ async def convert_musescore(
 @router.get("/musescore/status")
 def musescore_status(_: dict = Depends(get_current_user)):
     """Check whether the MuseScore CLI is available on this server."""
-    from analysis.musescore_converter import MUSESCORE_BIN
+    from musescore_converter import MUSESCORE_BIN
     return {
         "available": musescore_available(),
         "binary": MUSESCORE_BIN,
@@ -420,72 +531,28 @@ async def generate_synthesizer_track(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Generate a synthesized audio track from MusicXML score for training.
-    Uses basic note generation to create a reference playback.
-    
-    Returns WAV file with synthesized performance.
-    Phase 2: Full integration with score markings and dynamics.
+    Generate a synthesized WAV reference track from MusicXML notes.
+    Extracts pitch, duration, and chords via music21 when available, with a
+    lightweight XML fallback for simple MusicXML files.
     """
     data = await file.read()
     ext = Path(file.filename or "").suffix.lower()
-    
     if ext not in (".xml", ".musicxml", ".mxl"):
-        raise HTTPException(
-            status_code=422,
-            detail="Synthesizer requires a MusicXML file.",
+        raise HTTPException(status_code=422, detail="Synthesizer requires a MusicXML file.")
+    try:
+        note_events = _extract_musicxml_notes(data, tempo_override=tempo_override)
+        if not note_events:
+            raise HTTPException(status_code=422, detail="No pitched notes found in MusicXML.")
+        wav_data = _synthesize_notes_to_wav(note_events)
+        return Response(
+            content=wav_data,
+            media_type="audio/wav",
+            headers={"Content-Disposition": "attachment; filename=\"synthesizer_track.wav\""},
         )
-    
-    text = data.decode("utf-8", errors="ignore")
-    
-    # Extract tempo from score
-    tempo_match = re.search(r'<metronome>[\s\S]*?<per-minute>(\d+)</per-minute>', text)
-    tempo_bpm = tempo_override or (int(tempo_match.group(1)) if tempo_match else 120)
-    
-    # Extract time signature
-    time_sig_match = re.search(r'<time>\s*<beats>(\d+)</beats>\s*<beat-type>(\d+)</beat-type>', text)
-    beats_per_measure = int(time_sig_match.group(1)) if time_sig_match else 4
-    beat_unit = int(time_sig_match.group(2)) if time_sig_match else 4
-    
-    # Generate synthesized audio (simplified: just metronome for now)
-    sample_rate = 44100
-    beat_duration = 60 / tempo_bpm
-    
-    # Count notes for duration estimation
-    note_count = len(re.findall(r'<note\b', text))
-    estimated_beats = max(8, min(note_count // 4, 64))  # Estimate 4 notes per beat
-    
-    audio_data = bytearray()
-    frequency = 880  # A5 for synthesizer
-    
-    for beat in range(estimated_beats):
-        is_accented = (beat % beats_per_measure) == 0
-        amplitude = 24000 if is_accented else 12000
-        samples_per_beat = int(sample_rate * beat_duration)
-        note_length = int(samples_per_beat * 0.8)  # 80% of beat
-        
-        # Generate note
-        for i in range(note_length):
-            phase = 2 * math.pi * frequency * i / sample_rate
-            sample = int(amplitude * math.sin(phase))
-            audio_data.extend(struct.pack('<h', sample))
-        
-        # Silence
-        silence = samples_per_beat - note_length
-        audio_data.extend(b'\x00' * (silence * 2))
-    
-    # Create WAV
-    wav_buffer = io.BytesIO()
-    with wave.open(wav_buffer, 'wb') as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
-        wav.writeframes(bytes(audio_data))
-    
-    return Response(
-        content=wav_buffer.getvalue(),
-        media_type="audio/wav",
-        headers={"Content-Disposition": "attachment; filename=\"synthesizer_track.wav\""},
-    )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Synthesis failed: {exc}")
 
 
 @router.post("/training/segments")
