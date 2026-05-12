@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,16 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Always return JSON so the frontend can safely call response.json().
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc) or "Internal Server Error"},
+    )
+
 
 _raw_origins = os.environ.get(
     "CORS_ORIGINS",
@@ -60,7 +70,7 @@ STATIC_DIST_CANDIDATES = [Path("dist"), Path("static/dist")]
 STATIC_DIST = next((path for path in STATIC_DIST_CANDIDATES if path.exists()), Path("dist"))
 
 # Serve compiled assets (e.g. /assets/index-*.js) directly from the build output.
-if STATIC_DIST.exists():
+if STATIC_DIST.exists() and (STATIC_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIST / "assets")), name="assets")
 
 
