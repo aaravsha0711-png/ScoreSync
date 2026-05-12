@@ -18,18 +18,18 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
-export default function ShareButton({ scoreId }) {
+export default function ShareButton({ scoreId = null }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-
-  if (!scoreId) return null;
 
   const handleShare = async () => {
     setLoading(true);
     setMessage('');
 
     try {
-      const result = await apiRequest(`/sharing/scores/${scoreId}`, {
+      const path = scoreId ? `/sharing/scores/${scoreId}` : '/sharing/latest';
+
+      const result = await apiRequest(path, {
         method: 'POST',
         body: JSON.stringify({ expires_in_days: 30 }),
       });
@@ -53,7 +53,7 @@ export default function ShareButton({ scoreId }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
       <button type="button" onClick={handleShare} disabled={loading}>
-        {loading ? 'Sharing…' : 'Share'}
+        {loading ? 'Sharing…' : 'Share Latest Score'}
       </button>
       {message && <span style={{ fontSize: 12, opacity: 0.8 }}>{message}</span>}
     </div>
