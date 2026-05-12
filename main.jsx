@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./score-reader.jsx";
 import SharedScorePage from "./SharedScorePage.jsx";
+import GlobalControls from "./GlobalControls.jsx";
 import { ThemeProvider } from "./theme.jsx";
 import "./theme.css";
 
@@ -16,6 +17,7 @@ function Root() {
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ThemeProvider>
+      <GlobalControls />
       <Root />
     </ThemeProvider>
   </React.StrictMode>
