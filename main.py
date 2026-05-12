@@ -31,7 +31,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_raw_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+_raw_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
+)
 allowed_origins = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -51,9 +54,14 @@ UPLOAD_DIR = Path("uploads")
 if UPLOAD_DIR.exists():
     app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-STATIC_DIST = Path("static/dist")
+# Vite builds the frontend into ./dist by default.
+# Keep a fallback to ./static/dist for compatibility with older deployments.
+STATIC_DIST_CANDIDATES = [Path("dist"), Path("static/dist")]
+STATIC_DIST = next((path for path in STATIC_DIST_CANDIDATES if path.exists()), Path("dist"))
+
+# Serve compiled assets (e.g. /assets/index-*.js) directly from the build output.
 if STATIC_DIST.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIST)), name="static")
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIST / "assets")), name="assets")
 
 
 @app.get("/health")
@@ -72,12 +80,26 @@ def root():
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_spa(full_path: str):
     index_file = STATIC_DIST / "index.html"
-    api_prefixes = ("auth", "profile", "scores", "playback", "sharing", "health", "docs", "openapi.json", "uploads")
+    api_prefixes = (
+        "auth",
+        "profile",
+        "scores",
+        "playback",
+        "sharing",
+        "health",
+        "docs",
+        "openapi.json",
+        "uploads",
+        "assets",
+    )
+
     if index_file.exists() and not full_path.startswith(api_prefixes):
         return FileResponse(index_file)
+
     return JSONResponse({"detail": "Not found"}, status_code=404)
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
