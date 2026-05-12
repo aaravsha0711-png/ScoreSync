@@ -1,0 +1,27 @@
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --text: #111827;
+  --surface: #f9fafb;
+  --border: #d1d5db;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #111827;
+  --text: #f9fafb;
+  --surface: #1f2937;
+  --border: #374151;
+}
+
+html, body, #root {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100%;
+}
+
+button, input, textarea, select {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
