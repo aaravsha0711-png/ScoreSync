@@ -15,6 +15,7 @@ from database import init_db
 from playback import router as playback_router
 from profile import router as profile_router
 from scores import router as scores_router
+from sharing import router as sharing_router
 
 
 @asynccontextmanager
@@ -44,6 +45,7 @@ app.include_router(auth_router)
 app.include_router(scores_router)
 app.include_router(playback_router)
 app.include_router(profile_router)
+app.include_router(sharing_router)
 
 UPLOAD_DIR = Path("uploads")
 if UPLOAD_DIR.exists():
@@ -70,7 +72,7 @@ def root():
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_spa(full_path: str):
     index_file = STATIC_DIST / "index.html"
-    api_prefixes = ("auth", "profile", "scores", "playback", "health", "docs", "openapi.json", "uploads")
+    api_prefixes = ("auth", "profile", "scores", "playback", "sharing", "health", "docs", "openapi.json", "uploads")
     if index_file.exists() and not full_path.startswith(api_prefixes):
         return FileResponse(index_file)
     return JSONResponse({"detail": "Not found"}, status_code=404)
