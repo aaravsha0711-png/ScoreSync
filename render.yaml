@@ -2,13 +2,20 @@ services:
   - type: web
     name: scoresync
     runtime: python
+    plan: free
     buildCommand: |
       pip install -r requirements.txt
-      npm install
-      npm run build
+      if [ -f package.json ]; then
+        npm install
+        npm run build
+      fi
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
-      - key: SCORESYNC_SECRET
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SECRET_KEY
         generateValue: true
       - key: ENVIRONMENT
         value: production
@@ -16,6 +23,8 @@ services:
         fromDatabase:
           name: scoresync-db
           property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
 
 databases:
   - name: scoresync-db
