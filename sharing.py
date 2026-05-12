@@ -17,15 +17,14 @@ class ShareRequest(BaseModel):
     expires_in_days: int = 30
 
 
-@router.post("/scores/{score_id}")
-def create_share(score_id: int, payload: ShareRequest, user=Depends(get_current_user)):
+def _create_share_for_score(score_id: int, user_id: int, expires_in_days: int):
     token = secrets.token_urlsafe(24)
-    expires_at = (datetime.utcnow() + timedelta(days=max(1, payload.expires_in_days))).isoformat()
+    expires_at = (datetime.utcnow() + timedelta(days=max(1, expires_in_days))).isoformat()
 
     with get_conn() as conn:
         score = conn.execute(
             "SELECT id FROM score_uploads WHERE id = ? AND user_id = ?",
-            (score_id, user["id"]),
+            (score_id, user_id),
         ).fetchone()
         if not score:
             raise HTTPException(status_code=404, detail="Score not found")
@@ -39,10 +38,30 @@ def create_share(score_id: int, payload: ShareRequest, user=Depends(get_current_
 
         conn.execute(
             "INSERT INTO shared_scores (score_id, owner_id, share_token, expires_at, is_active) VALUES (?, ?, ?, ?, 1)",
-            (score_id, user["id"], token, expires_at),
+            (score_id, user_id, token, expires_at),
         )
 
     return {"token": token, "url": f"/shared/{token}", "expires_at": expires_at}
+
+
+@router.post("/scores/{score_id}")
+def create_share(score_id: int, payload: ShareRequest, user=Depends(get_current_user)):
+    return _create_share_for_score(score_id, user["id"], payload.expires_in_days)
+
+
+@router.post("/latest")
+def create_share_for_latest_score(payload: ShareRequest, user=Depends(get_current_user)):
+    """Create a share link for the authenticated user's most recently uploaded score."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM score_uploads WHERE user_id = ? ORDER BY uploaded_at DESC, id DESC LIMIT 1",
+            (user["id"],),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="No uploaded score found to share yet")
+
+    return _create_share_for_score(row["id"], user["id"], payload.expires_in_days)
 
 
 @router.get("/{token}")
