@@ -21,10 +21,7 @@ function MetricCard({ label, value, detail, accent = "var(--accent)" }) {
 
 function DashboardOverview() {
   const waveformBars = [32, 56, 42, 70, 48, 84, 40, 64, 52, 78, 45, 58, 36, 66, 50, 72];
-
-  const scrollToWorkspace = () => {
-    document.getElementById("scoresync-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const scrollToWorkspace = () => document.getElementById("scoresync-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const clickFirst = (selectors) => {
     for (const selector of selectors) {
@@ -50,12 +47,8 @@ function DashboardOverview() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
             <button onClick={() => clickFirst(['input[type="file"]'])}>Upload Score</button>
-            <button onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])} style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}>
-              Start Practice
-            </button>
-            <button onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])} style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}>
-              Calibrate Mic
-            </button>
+            <button onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])} style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}>Start Practice</button>
+            <button onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])} style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}>Calibrate Mic</button>
           </div>
         </div>
 
@@ -83,6 +76,48 @@ function DashboardOverview() {
   );
 }
 
+function BottomTabBar({ onMenu, onFullscreen }) {
+  const tabStyle = {
+    flex: 1,
+    background: "transparent",
+    border: "none",
+    boxShadow: "none",
+    padding: "8px 4px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 4,
+    color: "var(--text)",
+    fontSize: "0.72rem",
+    minHeight: 56,
+  };
+
+  const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  return (
+    <nav
+      className="glass"
+      style={{
+        position: "fixed",
+        left: 12,
+        right: 12,
+        bottom: 12,
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        padding: 6,
+        borderRadius: 24,
+      }}
+    >
+      <button style={tabStyle} onClick={() => scrollTo("scoresync-dashboard")} aria-label="Dashboard">🏠<span>Home</span></button>
+      <button style={tabStyle} onClick={() => scrollTo("scoresync-workspace")} aria-label="Scores">🎼<span>Score</span></button>
+      <button style={tabStyle} onClick={() => document.querySelector('button[title*="play" i], button[aria-label*="play" i]')?.click()} aria-label="Practice">▶️<span>Practice</span></button>
+      <button style={tabStyle} onClick={onFullscreen} aria-label="Full screen">⛶<span>Focus</span></button>
+      <button style={tabStyle} onClick={onMenu} aria-label="Menu">☰<span>Menu</span></button>
+    </nav>
+  );
+}
+
 function StudioShell({ children }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -96,7 +131,6 @@ function StudioShell({ children }) {
   const toggleFullscreen = async () => {
     const workspace = document.getElementById("scoresync-workspace");
     if (!workspace) return;
-
     if (document.fullscreenElement) {
       await document.exitFullscreen();
     } else {
@@ -106,7 +140,7 @@ function StudioShell({ children }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16, padding: isFullscreen ? 0 : 16 }}>
+    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16, padding: isFullscreen ? 0 : 16, paddingBottom: isFullscreen ? 0 : 110 }}>
       {!isFullscreen && (
         <header className="glass" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
@@ -114,12 +148,8 @@ function StudioShell({ children }) {
             <div style={{ fontWeight: 700 }}>Professional Practice Environment</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={toggleFullscreen} style={{ minWidth: 44, minHeight: 44 }} aria-label="Enter full screen">
-              ⛶
-            </button>
-            <button onClick={() => setMenuOpen((v) => !v)} style={{ minWidth: 44, minHeight: 44 }} aria-label="Toggle menu">
-              ☰
-            </button>
+            <button onClick={toggleFullscreen} style={{ minWidth: 44, minHeight: 44 }} aria-label="Enter full screen">⛶</button>
+            <button onClick={() => setMenuOpen((v) => !v)} style={{ minWidth: 44, minHeight: 44 }} aria-label="Toggle menu">☰</button>
           </div>
         </header>
       )}
@@ -128,23 +158,14 @@ function StudioShell({ children }) {
         {!isFullscreen && menuOpen && (
           <aside className="glass" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
             <div>
-              <div style={{ fontSize: "0.75rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
-                Digital Music Studio
-              </div>
+              <div style={{ fontSize: "0.75rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>Digital Music Studio</div>
               <div style={{ fontSize: "2rem", fontWeight: 800 }}>ScoreSync</div>
             </div>
-            <nav style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {["🎼 Scores", "🎧 Practice", "🎛️ Calibration", "📈 Progress"].map((label) => (
-                <button key={label} onClick={() => setMenuOpen(false)} style={{ textAlign: "left" }}>
-                  {label}
-                </button>
-              ))}
-            </nav>
           </aside>
         )}
 
         <main style={{ minWidth: 0 }}>
-          {!isFullscreen && <DashboardOverview />}
+          {!isFullscreen && <div id="scoresync-dashboard"><DashboardOverview /></div>}
           <div id="scoresync-workspace" className="glass" style={{ padding: 20, minHeight: isFullscreen ? "100vh" : "calc(100vh - 120px)", borderRadius: isFullscreen ? 0 : undefined }}>
             {isFullscreen && (
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -155,6 +176,8 @@ function StudioShell({ children }) {
           </div>
         </main>
       </div>
+
+      {!isFullscreen && <BottomTabBar onMenu={() => setMenuOpen((v) => !v)} onFullscreen={toggleFullscreen} />}
     </div>
   );
 }
@@ -162,12 +185,7 @@ function StudioShell({ children }) {
 function Root() {
   const match = window.location.pathname.match(/^\/shared\/([^/]+)$/);
   if (match) return <SharedScorePage token={match[1]} />;
-
-  return (
-    <StudioShell>
-      <App />
-    </StudioShell>
-  );
+  return <StudioShell><App /></StudioShell>;
 }
 
 createRoot(document.getElementById("root")).render(
