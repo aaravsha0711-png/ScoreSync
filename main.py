@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from auth import router as auth_router
+from composer import router as composer_router, init_composer_tables
 from database import init_db
 from playback import router as playback_router
 from profile import router as profile_router
@@ -20,6 +21,7 @@ from scores import router as scores_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    init_composer_tables()
     yield
 
 
@@ -44,6 +46,7 @@ app.include_router(auth_router)
 app.include_router(scores_router)
 app.include_router(playback_router)
 app.include_router(profile_router)
+app.include_router(composer_router)
 
 UPLOAD_DIR = Path("uploads")
 if UPLOAD_DIR.exists():
