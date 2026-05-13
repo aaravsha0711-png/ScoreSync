@@ -10,16 +10,7 @@ function MetricCard({ label, value, detail, accent = "var(--accent)" }) {
   return (
     <div className="glass" style={{ padding: 18, position: "relative", overflow: "hidden" }}>
       <div
-        style={{
-          position: "absolute",
-          inset: "auto -30px -42px auto",
-          width: 110,
-          height: 110,
-          borderRadius: 999,
-          background: accent,
-          opacity: 0.12,
-          filter: "blur(8px)",
-        }}
+        style={{ position: "absolute", inset: "auto -30px -42px auto", width: 110, height: 110, borderRadius: 999, background: accent, opacity: 0.12, filter: "blur(8px)" }}
       />
       <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 8 }}>{label}</div>
       <div style={{ fontSize: "1.75rem", fontWeight: 800 }}>{value}</div>
@@ -48,15 +39,7 @@ function DashboardOverview() {
 
   return (
     <section style={{ display: "grid", gap: 16, marginBottom: 18 }}>
-      <div
-        className="glass"
-        style={{
-          padding: 24,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: 20,
-        }}
-      >
+      <div className="glass" style={{ padding: 24, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
         <div>
           <div style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.22em", textTransform: "uppercase", fontWeight: 800, marginBottom: 10 }}>
             Practice Command Center
@@ -67,16 +50,10 @@ function DashboardOverview() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
             <button onClick={() => clickFirst(['input[type="file"]'])}>Upload Score</button>
-            <button
-              onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])}
-              style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}
-            >
+            <button onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])} style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}>
               Start Practice
             </button>
-            <button
-              onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])}
-              style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}
-            >
+            <button onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])} style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}>
               Calibrate Mic
             </button>
           </div>
@@ -89,17 +66,7 @@ function DashboardOverview() {
           </div>
           <div style={{ display: "flex", alignItems: "end", gap: 6, height: 92 }}>
             {waveformBars.map((height, index) => (
-              <div
-                key={index}
-                style={{
-                  flex: 1,
-                  height: `${height}%`,
-                  minWidth: 5,
-                  borderRadius: 999,
-                  background: "linear-gradient(180deg, var(--accent), var(--accent-2))",
-                  opacity: 0.72,
-                }}
-              />
+              <div key={index} style={{ flex: 1, height: `${height}%`, minWidth: 5, borderRadius: 999, background: "linear-gradient(180deg, var(--accent), var(--accent-2))", opacity: 0.72 }} />
             ))}
           </div>
           <div style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>Visual monitor reserved for live pitch, volume, and timing data.</div>
@@ -118,21 +85,47 @@ function DashboardOverview() {
 
 function StudioShell({ children }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+
+  React.useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const workspace = document.getElementById("scoresync-workspace");
+    if (!workspace) return;
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await workspace.requestFullscreen();
+      workspace.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16, padding: 16 }}>
-      <header className="glass" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Workspace</div>
-          <div style={{ fontWeight: 700 }}>Professional Practice Environment</div>
-        </div>
-        <button onClick={() => setMenuOpen((v) => !v)} style={{ minWidth: 44, minHeight: 44 }} aria-label="Toggle menu">
-          ☰
-        </button>
-      </header>
+    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16, padding: isFullscreen ? 0 : 16 }}>
+      {!isFullscreen && (
+        <header className="glass" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Workspace</div>
+            <div style={{ fontWeight: 700 }}>Professional Practice Environment</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={toggleFullscreen} style={{ minWidth: 44, minHeight: 44 }} aria-label="Enter full screen">
+              ⛶
+            </button>
+            <button onClick={() => setMenuOpen((v) => !v)} style={{ minWidth: 44, minHeight: 44 }} aria-label="Toggle menu">
+              ☰
+            </button>
+          </div>
+        </header>
+      )}
 
-      <div style={{ display: "grid", gridTemplateColumns: menuOpen ? "1fr" : "1fr", gap: 16 }}>
-        {menuOpen && (
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+        {!isFullscreen && menuOpen && (
           <aside className="glass" style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
             <div>
               <div style={{ fontSize: "0.75rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
@@ -151,8 +144,13 @@ function StudioShell({ children }) {
         )}
 
         <main style={{ minWidth: 0 }}>
-          <DashboardOverview />
-          <div id="scoresync-workspace" className="glass" style={{ padding: 20, minHeight: "calc(100vh - 120px)" }}>
+          {!isFullscreen && <DashboardOverview />}
+          <div id="scoresync-workspace" className="glass" style={{ padding: 20, minHeight: isFullscreen ? "100vh" : "calc(100vh - 120px)", borderRadius: isFullscreen ? 0 : undefined }}>
+            {isFullscreen && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                <button onClick={toggleFullscreen} aria-label="Exit full screen">Exit Full Screen</button>
+              </div>
+            )}
             {children}
           </div>
         </main>
