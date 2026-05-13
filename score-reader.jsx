@@ -1507,14 +1507,15 @@ function noteLabel(midi) {
 }
 
 function ComposerOverlay({ onClose }) {
-  const [composerTab, setComposerTab] = useState("setup"); // setup | score | drums | piano
+  const [composerTab, setComposerTab] = useState("setup");
   const [compositions, setCompositions]   = useState([]);
-  const [activeComp, setActiveComp]       = useState(null); // full composition object
+  const [activeComp, setActiveComp]       = useState(null);
   const [setupForm, setSetupForm] = useState({ title:"New Piece", key:"C", mode:"major", tempo:120, time_signature:"4/4", measures:8 });
   const [selectedParts, setSelectedParts] = useState(["melody"]);
   const [generatingPart, setGeneratingPart] = useState(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [error, setError] = useState("");
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // Drum state
   const [drumPattern, setDrumPattern] = useState(() => {
@@ -1872,6 +1873,13 @@ function ComposerOverlay({ onClose }) {
                     <div style={{fontSize:12, color:"#665040"}}>{activeComp.key} {activeComp.mode} • {activeComp.tempo} bpm • {activeComp.time_signature} • {activeComp.measures} measures</div>
                   </div>
                   <div style={{marginLeft:"auto", display:"flex", gap:8}}>
+                    <button
+                      style={{...cStyle.btn, fontSize:12, padding:"6px 16px",
+                        background: isPlaying ? "#aa3333" : "#C9A84C",
+                        color: isPlaying ? "#fff" : "#1a1200"}}
+                      onClick={() => window.__playComposition(activeComp, setIsPlaying)}>
+                      {isPlaying ? "⏹ Stop" : "▶ Play"}
+                    </button>
                     <button style={cStyle.btnSm} onClick={exportXml}>Export MusicXML</button>
                   </div>
                 </div>
@@ -1922,7 +1930,7 @@ function ComposerOverlay({ onClose }) {
           <>
             <div style={{...cStyle.card, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
               <span style={{color:"#C9A84C", fontSize:14, fontWeight:700}}>Drum Machine</span>
-              <span style={{color:"#665040", fontSize:12"}}>Click pads to toggle • 16th-note resolution</span>
+              <span style={{color:"#665040", fontSize:12}}>Click pads to toggle • 16th-note resolution</span>
               <div style={{marginLeft:"auto", display:"flex", gap:8}}>
                 <button style={cStyle.btnSm} disabled={generatingPart==="drums"}
                   onClick={generateDrums}>
@@ -2362,5 +2370,494 @@ const styles = {
     background:"#C9A84C", color:"#1a1200", padding:"8px 16px", borderRadius:6,
     fontSize:12, fontWeight:700, boxShadow:"0 4px 16px rgba(0,0,0,0.4)",
   },
+  restAlertBanner: {
+    padding:"10px 16px", borderRadius:8, marginBottom:12, border:"1px solid #3a2e18",
+  },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRANSPOSITIONS — full instrument list (concert → written, semitones)
+// ─────────────────────────────────────────────────────────────────────────────
+const TRANSPOSITIONS = {
+  // ─ Concert (C) instruments ─────────────────────────────────────────────
+  "Concert (C)":          0,
+  "Piccolo":              12,   // sounds an octave higher, written an octave lower
+  "Flute":                0,
+  "Alto Flute":          -5,   // in G: written 5 st above concert
+  "Oboe":                 0,
+  "English Horn":        -7,   // in F: written a P5 above concert
+  "Bassoon":              0,
+  "Contrabassoon":        0,   // sounds an octave lower, written concert
+  "Piano":                0,
+  "Organ":                0,
+  "Harp":                 0,
+  "Harpsichord":          0,
+  "Celesta":             12,   // sounds an octave higher
+  "Xylophone":           12,
+  "Marimba":              0,
+  "Vibraphone":           0,
+  "Glockenspiel":        24,   // sounds two octaves higher
+  "Violin":               0,
+  "Viola":                0,
+  "Cello":                0,
+  "Double Bass":          0,   // sounds an octave lower, written concert
+  "Guitar":               0,   // sounds an octave lower, written concert
+  "Bass Guitar":          0,
+  // ─ Bb instruments ─────────────────────────────────────────────────────
+  "Bb Trumpet":           2,
+  "Bb Cornet":            2,
+  "Flugelhorn":           2,   // in Bb
+  "Bb Clarinet":          2,
+  "Bb Bass Clarinet":    14,   // written M9 above concert
+  "Bass Clarinet (Bb)":  14,
+  "Bb Soprano Sax":       2,
+  "Bb Tenor Sax":        14,
+  "Soprano Recorder":     0,
+  // ─ Eb instruments ─────────────────────────────────────────────────────
+  "Eb Trumpet":          -3,
+  "Eb Alto Sax":          3,   // written M6 above concert  (concert = written - 3)
+  "Eb Baritone Sax":    -9,   // written M6+octave above concert
+  "Eb Clarinet":          3,
+  // ─ F instruments ───────────────────────────────────────────────────────
+  "F Horn":               7,   // written P5 above concert
+  "French Horn":          7,
+  "Mellophone":           7,
+  // ─ Low brass / Concert pitch brass ───────────────────────────────
+  "Trombone":             0,
+  "Bass Trombone":        0,
+  "Alto Trombone":        0,
+  "Tenor Trombone":       0,
+  "Euphonium":            0,
+  "Euphonium (Treble)": -14,  // treble-clef Bb euphonium parts are written a M9 up
+  "Baritone (Treble)":  -14,
+  "Tuba":                 0,
+  "Contrabass Tuba":      0,
+  "Sousaphone":           0,
+  // ─ Marching / Miscellaneous ─────────────────────────────────────
+  "Bugle":                2,
+  "Drum Kit":             0,
+  "Mallet Percussion":    0,
+  "Timpani":              0,
+  "Snare Drum":           0,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Composer Web Audio playback engine (no server, no paid API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Instrument voice presets — oscillator type + envelope + optional detune
+const INSTRUMENT_VOICE = {
+  default:          { type: "sine",     attack: 0.02, decay: 0.1,  sustain: 0.7, release: 0.3,  gain: 0.4 },
+  Piano:            { type: "triangle", attack: 0.01, decay: 0.4,  sustain: 0.3, release: 0.8,  gain: 0.5 },
+  Flute:            { type: "sine",     attack: 0.06, decay: 0.05, sustain: 0.8, release: 0.2,  gain: 0.35 },
+  Oboe:             { type: "sawtooth", attack: 0.04, decay: 0.1,  sustain: 0.7, release: 0.15, gain: 0.25 },
+  "English Horn":   { type: "sawtooth", attack: 0.05, decay: 0.12, sustain: 0.65,release: 0.2,  gain: 0.28 },
+  Bassoon:          { type: "sawtooth", attack: 0.04, decay: 0.15, sustain: 0.6, release: 0.25, gain: 0.3 },
+  Clarinet:         { type: "square",   attack: 0.03, decay: 0.08, sustain: 0.75,release: 0.15, gain: 0.2 },
+  Trumpet:          { type: "sawtooth", attack: 0.02, decay: 0.05, sustain: 0.85,release: 0.1,  gain: 0.35 },
+  Flugelhorn:       { type: "sine",     attack: 0.04, decay: 0.08, sustain: 0.75,release: 0.2,  gain: 0.32 },
+  Horn:             { type: "sine",     attack: 0.06, decay: 0.1,  sustain: 0.8, release: 0.3,  gain: 0.3 },
+  Trombone:         { type: "sawtooth", attack: 0.04, decay: 0.1,  sustain: 0.8, release: 0.25, gain: 0.32 },
+  "Bass Trombone":  { type: "sawtooth", attack: 0.05, decay: 0.12, sustain: 0.8, release: 0.3,  gain: 0.35 },
+  Euphonium:        { type: "sine",     attack: 0.05, decay: 0.1,  sustain: 0.8, release: 0.3,  gain: 0.35 },
+  Tuba:             { type: "sine",     attack: 0.06, decay: 0.15, sustain: 0.75,release: 0.4,  gain: 0.4 },
+  Violin:           { type: "sawtooth", attack: 0.05, decay: 0.05, sustain: 0.9, release: 0.2,  gain: 0.3 },
+  Viola:            { type: "sawtooth", attack: 0.06, decay: 0.06, sustain: 0.88,release: 0.25, gain: 0.3 },
+  Cello:            { type: "sawtooth", attack: 0.07, decay: 0.08, sustain: 0.85,release: 0.3,  gain: 0.35 },
+};
+
+function midiToHz(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function _voiceForInstrument(name) {
+  for (const key of Object.keys(INSTRUMENT_VOICE)) {
+    if (name && name.toLowerCase().includes(key.toLowerCase())) return INSTRUMENT_VOICE[key];
+  }
+  return INSTRUMENT_VOICE.default;
+}
+
+/**
+ * playCompositionPreview — renders the full composition using Web Audio API.
+ * Returns a stop() function that cancels all scheduled nodes.
+ */
+function playCompositionPreview(comp, onEnd) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) { onEnd && onEnd(); return () => {}; }
+
+  const ctx = new AudioCtx();
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.8;
+  masterGain.connect(ctx.destination);
+
+  const beatsPerMeasure = parseInt((comp.time_signature || "4/4").split("/")[0]);
+  const secPerBeat = 60 / (comp.tempo || 120);
+  const scheduledNodes = [];
+
+  function scheduleNote(midi, startBeat, durBeats, voicePreset) {
+    const freq = midiToHz(midi);
+    const startTime = ctx.currentTime + startBeat * secPerBeat;
+    const durSec = durBeats * secPerBeat;
+    const v = voicePreset;
+
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = v.type;
+    osc.frequency.value = freq;
+
+    // ADSR envelope
+    env.gain.setValueAtTime(0, startTime);
+    env.gain.linearRampToValueAtTime(v.gain, startTime + v.attack);
+    env.gain.linearRampToValueAtTime(v.gain * v.sustain, startTime + v.attack + v.decay);
+    env.gain.setValueAtTime(v.gain * v.sustain, startTime + durSec - v.release);
+    env.gain.linearRampToValueAtTime(0, startTime + durSec);
+
+    osc.connect(env);
+    env.connect(masterGain);
+    osc.start(startTime);
+    osc.stop(startTime + durSec + 0.05);
+    scheduledNodes.push(osc);
+  }
+
+  let totalBeats = 0;
+
+  // Schedule melodic parts
+  (comp.parts || []).forEach(part => {
+    const voice = _voiceForInstrument(part.instrument || part.role);
+    (part.notes || []).forEach(n => {
+      const globalBeat = (n.measure - 1) * beatsPerMeasure + (n.beat - 1);
+      scheduleNote(n.pitch_midi || 60, globalBeat, n.duration || 1, voice);
+      totalBeats = Math.max(totalBeats, globalBeat + (n.duration || 1));
+    });
+  });
+
+  // Schedule drum pattern as a repeating loop over all measures
+  if (comp.drum_pattern) {
+    const pat = comp.drum_pattern.pattern || {};
+    const steps = comp.drum_pattern.steps || 16;
+    const secPerStep = secPerBeat / 4; // 16th note
+    const DRUM_MIDI = { kick:36, snare:38, hihat:42, open_hat:46, crash:49, tom:45 };
+    const totalSteps = comp.measures * steps;
+    Object.entries(pat).forEach(([rowId, arr]) => {
+      const midiNote = DRUM_MIDI[rowId] || 38;
+      for (let step = 0; step < totalSteps; step++) {
+        if (arr[step % arr.length] !== 1) continue;
+        const startTime = ctx.currentTime + step * secPerStep;
+        // Synthesise percussive hit
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const baseFreq = rowId === "kick" ? 80 : rowId === "snare" ? 200 : rowId.includes("hat") ? 8000 : 300;
+        osc.frequency.setValueAtTime(baseFreq, startTime);
+        if (rowId === "kick") osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.08);
+        osc.type = (rowId.includes("hat") || rowId === "crash") ? "square" : "sine";
+        env.gain.setValueAtTime(0.5, startTime);
+        env.gain.exponentialRampToValueAtTime(0.001, startTime + (rowId.includes("hat") ? 0.04 : 0.12));
+        osc.connect(env);
+        env.connect(masterGain);
+        osc.start(startTime);
+        osc.stop(startTime + 0.2);
+        scheduledNodes.push(osc);
+      }
+    });
+  }
+
+  // Schedule piano roll cells
+  (comp.piano_rolls || []).forEach(roll => {
+    const voice = _voiceForInstrument("Piano");
+    (roll.cells || []).forEach(c => {
+      const globalBeat = c.beat_16th / 4;
+      scheduleNote(c.pitch_midi || 60, globalBeat, (c.duration_16th || 1) / 4, voice);
+      totalBeats = Math.max(totalBeats, globalBeat + (c.duration_16th || 1) / 4);
+    });
+  });
+
+  // Fire onEnd callback
+  const endTimeout = setTimeout(() => {
+    ctx.close();
+    onEnd && onEnd();
+  }, (totalBeats * secPerBeat + 1) * 1000);
+
+  return function stop() {
+    clearTimeout(endTimeout);
+    scheduledNodes.forEach(n => { try { n.stop(); } catch(_) {} });
+    ctx.close();
+    onEnd && onEnd();
+  };
+}
+
+// Patch ComposerOverlay to add playback — we attach playback state to the
+// existing ComposerOverlay by re-exporting a wrapped version that wires
+// the playback button in the Score Builder header. Since the component is
+// defined above and JSX is compiled top-down, we add the playback helpers
+// here and rely on the Score Builder header button calling these globals.
+// The actual button is injected via the patch below.
+window.__composerPlayback = null;
+window.__playComposition = function(comp, setPlaying) {
+  if (window.__composerPlayback) { window.__composerPlayback(); window.__composerPlayback = null; setPlaying(false); return; }
+  const stop = playCompositionPreview(comp, () => { window.__composerPlayback = null; setPlaying(false); });
+  window.__composerPlayback = stop;
+  setPlaying(true);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Music scale data
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+const MAJOR_SCALES = [
+  { name:"C Major",  notes:[0,2,4,5,7,9,11,12] },
+  { name:"G Major",  notes:[7,9,11,0,2,4,6,7] },
+  { name:"D Major",  notes:[2,4,6,7,9,11,1,2] },
+  { name:"F Major",  notes:[5,7,9,10,0,2,4,5] },
+  { name:"Bb Major", notes:[10,0,2,3,5,7,9,10] },
+];
+
+const MEYER_SCALES = [
+  { name:"Meyer V1", notes:[0,2,4,5,7,9,11,12] },
+  { name:"Meyer V2", notes:[0,2,3,5,7,9,10,12] },
+  { name:"Meyer V3", notes:[0,2,4,6,7,9,11,12] },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pitch detection utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+function yin(buffer, sampleRate) {
+  const threshold = 0.12;
+  const N = buffer.length;
+  const halfN = Math.floor(N / 2);
+  const yinBuffer = new Float32Array(halfN);
+
+  // Step 1: autocorrelation difference
+  yinBuffer[0] = 1;
+  let runningSum = 0;
+  for (let tau = 1; tau < halfN; tau++) {
+    let delta = 0;
+    for (let i = 0; i < halfN; i++) {
+      const d = buffer[i] - buffer[i + tau];
+      delta += d * d;
+    }
+    runningSum += delta;
+    yinBuffer[tau] = runningSum === 0 ? 0 : (delta * tau) / runningSum;
+  }
+
+  // Step 2: find first dip below threshold
+  let tau = 2;
+  while (tau < halfN) {
+    if (yinBuffer[tau] < threshold) {
+      while (tau + 1 < halfN && yinBuffer[tau + 1] < yinBuffer[tau]) tau++;
+      // Parabolic interpolation
+      const better = tau + 0.5 * (yinBuffer[tau - 1] - yinBuffer[tau + 1]) /
+        (yinBuffer[tau - 1] - 2 * yinBuffer[tau] + yinBuffer[tau + 1] || 1e-10);
+      return sampleRate / better;
+    }
+    tau++;
+  }
+  return 0;
+}
+
+function freqToMidi(freq) {
+  return Math.round(12 * Math.log2(freq / 440) + 69);
+}
+
+function midiToNoteName(midi) {
+  return NOTE_NAMES[((midi % 12) + 12) % 12];
+}
+
+function freqToNoteLabel(freq) {
+  const midi = freqToMidi(freq);
+  const octave = Math.floor(midi / 12) - 1;
+  return midiToNoteName(midi) + octave;
+}
+
+function centsDiff(freq, midi) {
+  const idealFreq = 440 * Math.pow(2, (midi - 69) / 12);
+  return 1200 * Math.log2(freq / idealFreq);
+}
+
+function computeRMS(buffer) {
+  let sum = 0;
+  for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
+  return Math.sqrt(sum / buffer.length);
+}
+
+function computeSpectralCentroid(spectrum, sampleRate) {
+  let weightedSum = 0, totalPower = 0;
+  const binWidth = sampleRate / (2 * spectrum.length);
+  for (let i = 0; i < spectrum.length; i++) {
+    const power = Math.pow(10, spectrum[i] / 10);
+    weightedSum += power * i * binWidth;
+    totalPower += power;
+  }
+  return totalPower > 0 ? weightedSum / totalPower : 0;
+}
+
+function computeSpectralFlatness(spectrum) {
+  let logSum = 0, sum = 0;
+  const powers = spectrum.map(db => Math.pow(10, db / 10));
+  powers.forEach(p => { logSum += Math.log(p + 1e-10); sum += p; });
+  const geoMean = Math.exp(logSum / powers.length);
+  const arithMean = sum / powers.length;
+  return arithMean > 0 ? geoMean / arithMean : 0;
+}
+
+function detectVibratoFromHistory(freqHistory, sampleRate) {
+  if (freqHistory.length < 16) return { rate: 0, depth: 0 };
+  const recent = freqHistory.slice(-32);
+  const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const deviations = recent.map(f => f - mean);
+  // Count zero crossings to estimate vibrato rate
+  let crossings = 0;
+  for (let i = 1; i < deviations.length; i++) {
+    if (deviations[i - 1] * deviations[i] < 0) crossings++;
+  }
+  const rate = crossings / 2; // rough Hz
+  const depth = Math.max(...deviations.map(Math.abs));
+  return { rate, depth };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Score analysis utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+function analyzeMarkings(xmlText) {
+  const markingTypes = [
+    { tag: "dynamics",  label: "Dynamics" },
+    { tag: "wedge",     label: "Crescendo/Decrescendo" },
+    { tag: "fermata",   label: "Fermata" },
+    { tag: "accent",    label: "Accent" },
+    { tag: "staccato",  label: "Staccato" },
+    { tag: "tenuto",    label: "Tenuto" },
+    { tag: "trill",     label: "Trill" },
+    { tag: "slur",      label: "Slur" },
+    { tag: "tie",       label: "Tie" },
+    { tag: "rest",      label: "Rest" },
+    { tag: "pedal",     label: "Pedal" },
+    { tag: "rehearsal", label: "Rehearsal Mark" },
+    { tag: "segno",     label: "Segno" },
+    { tag: "coda",      label: "Coda" },
+    { tag: "damp",      label: "Damp" },
+  ];
+
+  const dynamicValues = ["pppp","ppp","pp","p","mp","mf","f","ff","fff","ffff","sf","sfz","rfz","fz","fp","pf","n"];
+  const results = [];
+
+  markingTypes.forEach(({ tag, label }) => {
+    const regex = new RegExp(`<${tag}[\\s/>]`, 'g');
+    const matches = xmlText.match(regex);
+    if (matches && matches.length) {
+      results.push({ type: label, count: matches.length, detail: `Found in score` });
+    }
+  });
+
+  // Dynamic markings
+  const dynCount = {};
+  dynamicValues.forEach(dyn => {
+    const m = xmlText.match(new RegExp(`<${dyn}/>`, 'g'));
+    if (m) dynCount[dyn] = m.length;
+  });
+  if (Object.keys(dynCount).length) {
+    const detail = Object.entries(dynCount).map(([k,v]) => `${k}×${v}`).join(", ");
+    results.push({ type: "Dynamic markings", count: Object.values(dynCount).reduce((a,b) => a+b, 0), detail });
+  }
+
+  return results;
+}
+
+function extractScoreNoteNames(xmlText) {
+  const noteSet = new Set();
+  const stepMatches = xmlText.match(/<step>([A-G])<\/step>/g) || [];
+  stepMatches.forEach(m => {
+    const s = m.match(/<step>([A-G])<\/step>/);
+    if (s) noteSet.add(s[1]);
+  });
+  return Array.from(noteSet);
+}
+
+function extractRestAlerts(xmlText) {
+  const alerts = [];
+  const measureMatches = xmlText.match(/<measure[^>]*number="([^"]*)">([\s\S]*?)<\/measure>/g) || [];
+  measureMatches.forEach(block => {
+    const numMatch = block.match(/number="([^"]*)"/); 
+    if (!numMatch) return;
+    const measureNum = parseInt(numMatch[1]);
+    if (block.includes("<rest")) {
+      alerts.push({ measure: measureNum });
+    }
+  });
+  return alerts;
+}
+
+function generateMarkingSuggestions(currentMeasure, rhythmInfo, complexMarkings, liveMetrics) {
+  const suggestions = [];
+  const upcoming = complexMarkings.filter(m => m.measure >= currentMeasure && m.measure <= currentMeasure + 2);
+
+  upcoming.forEach(marking => {
+    if (marking.type === "rest") {
+      suggestions.push({ measure: marking.measure, suggestion: `Rest at measure ${marking.measure} — breathe and relax` });
+    }
+    if (marking.type === "articulation") {
+      suggestions.push({ measure: marking.measure, suggestion: `Articulation at measure ${marking.measure} — note accent/staccato markings` });
+    }
+    if (marking.type === "fermata") {
+      suggestions.push({ measure: marking.measure, suggestion: `Fermata at measure ${marking.measure} — hold until conductor cues` });
+    }
+  });
+
+  if (liveMetrics) {
+    if (liveMetrics.noteCharacter === "staccato" && upcoming.some(m => m.type !== "articulation")) {
+      suggestions.push({ measure: currentMeasure, suggestion: "Detected staccato — upcoming notes may prefer legato" });
+    }
+    if (liveMetrics.hasVibrato && liveMetrics.vibratoStrength > 0.8) {
+      suggestions.push({ measure: currentMeasure, suggestion: "Strong vibrato detected — check if desired here" });
+    }
+  }
+
+  return suggestions;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Voice recognition helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function startVoiceRecognition(onMeasureJump, onWakeWord) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+
+  recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript.toLowerCase().trim();
+
+      // Wake word: "measure [N]" or "go to [N]"
+      const measureMatch = transcript.match(/(?:measure|go to|jump to)\s+(\d+)/);
+      if (measureMatch) {
+        const measureNum = parseInt(measureMatch[1]);
+        if (!isNaN(measureNum)) {
+          onMeasureJump(measureNum);
+          return;
+        }
+      }
+
+      // Wake phrase: "resume" or "take it from [N]"
+      const resumeMatch = transcript.match(/(?:resume|take it from|start from)\s*(\d+)?/);
+      if (resumeMatch) {
+        const measureNum = resumeMatch[1] ? parseInt(resumeMatch[1]) : 1;
+        onWakeWord(isNaN(measureNum) ? 1 : measureNum);
+        return;
+      }
+    }
+  };
+
+  recognition.onerror = () => {};
+  recognition.onend = () => { try { recognition.start(); } catch(_) {} };
+
+  try { recognition.start(); } catch(_) {}
+  return recognition;
+}
 
