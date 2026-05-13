@@ -196,7 +196,6 @@ button[title*='tune' i] {
     0 10px 30px rgba(16, 185, 129, 0.18);
 }
 
-/* Pitch and calibration panels */
 div:has(input[type='range']) {
   position: relative;
 }
@@ -209,19 +208,18 @@ div:has(input[type='range'])::after {
   width: 84px;
   height: 84px;
   border-radius: 50%;
-  background:
-    conic-gradient(
-      var(--success) 0deg 120deg,
-      var(--accent) 120deg 240deg,
-      var(--accent-2) 240deg 360deg
-    );
+  background: conic-gradient(
+    var(--success) 0deg 120deg,
+    var(--accent) 120deg 240deg,
+    var(--accent-2) 240deg 360deg
+  );
   mask: radial-gradient(circle at center, transparent 56%, black 58%);
   opacity: 0.9;
   filter: drop-shadow(0 0 18px rgba(16, 185, 129, 0.18));
   pointer-events: none;
+  animation: pulseRing 2.4s ease-in-out infinite;
 }
 
-/* Success and accuracy indicators */
 strong,
 span[style*='color: green'],
 span[style*='color: #10b981'] {
@@ -233,10 +231,6 @@ span[style*='color: #10b981'] {
   50% { transform: scale(1.04); opacity: 1; }
 }
 
-div:has(input[type='range'])::after {
-  animation: pulseRing 2.4s ease-in-out infinite;
-}
-
 @media (max-width: 1024px) {
   div[style*='grid-template-columns: 260px 1fr'] {
     grid-template-columns: 1fr !important;
@@ -244,9 +238,26 @@ div:has(input[type='range'])::after {
 }
 
 @media (max-width: 768px) {
-  body { background-attachment: fixed; }
+  body {
+    background-attachment: fixed;
+  }
+
+  /* Disable decorative tuner overlay so controls remain tappable */
   div:has(input[type='range'])::after {
-    width: 64px;
-    height: 64px;
+    display: none !important;
+  }
+
+  /* Reduce extra padding around score content */
+  div:has(svg[id*='verovio']),
+  div:has(svg[class*='verovio']),
+  div:has(img[alt*='score' i]),
+  div:has(canvas) {
+    padding: 12px !important;
+  }
+
+  /* Keep buttons above decorative layers */
+  button {
+    position: relative;
+    z-index: 2;
   }
 }
