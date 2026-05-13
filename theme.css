@@ -168,6 +168,92 @@ h1, h2, h3 {
   background: rgba(0, 217, 255, 0.22);
 }
 
+/* Premium authentication and onboarding polish.
+   The auth screens use inline style objects in score-reader.jsx, so these
+   attribute selectors intentionally override those defaults without touching
+   auth logic. */
+div[style*='min-height'][style*='justify-content: center'],
+div[style*='minHeight'][style*='justifyContent'] {
+  background:
+    radial-gradient(circle at 10% 15%, rgba(0, 217, 255, 0.22), transparent 26%),
+    radial-gradient(circle at 90% 20%, rgba(139, 92, 246, 0.20), transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(16, 185, 129, 0.10), transparent 28%),
+    linear-gradient(135deg, #070a12, #121826 55%, #0a0d14) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  padding: clamp(24px, 5vw, 64px) !important;
+}
+
+div[style*='min-height'][style*='justify-content: center']::before,
+div[style*='minHeight'][style*='justifyContent']::before {
+  content: '♪   ♫   ♬   ♩   ♭   ♯';
+  position: absolute;
+  inset: 8% auto auto 6%;
+  width: 88%;
+  color: rgba(255, 255, 255, 0.07);
+  font-size: clamp(2rem, 7vw, 6rem);
+  letter-spacing: 0.25em;
+  pointer-events: none;
+  filter: blur(0.2px);
+}
+
+div[style*='max-width'],
+div[style*='maxWidth'] {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.045)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  backdrop-filter: blur(22px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.15) !important;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.45),
+    0 0 60px rgba(0, 217, 255, 0.12) !important;
+}
+
+input[placeholder='Email'],
+input[placeholder='Password'],
+input[placeholder='Display name'] {
+  width: 100% !important;
+  min-height: 48px !important;
+  margin-top: 10px !important;
+  background: rgba(3, 7, 18, 0.34) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: var(--text) !important;
+}
+
+input[placeholder='Email']::placeholder,
+input[placeholder='Password']::placeholder,
+input[placeholder='Display name']::placeholder {
+  color: rgba(226, 232, 240, 0.58) !important;
+}
+
+input[placeholder='Email']:focus,
+input[placeholder='Password']:focus,
+input[placeholder='Display name']:focus {
+  border-color: rgba(0, 217, 255, 0.55) !important;
+  box-shadow:
+    0 0 0 4px rgba(0, 217, 255, 0.13),
+    0 0 26px rgba(0, 217, 255, 0.12) !important;
+}
+
+button[style*='margin-top'],
+button[style*='marginTop'] {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
+  border: 0 !important;
+  color: white !important;
+  min-height: 46px !important;
+  border-radius: 14px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+}
+
+button[style*='background: transparent'],
+button[style*='backgroundColor: transparent'] {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--accent) !important;
+  border: 0 !important;
+}
+
 @media (max-width: 768px) {
   body {
     background-attachment: fixed;
