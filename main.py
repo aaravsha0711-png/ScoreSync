@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from database import init_db
 from playback import router as playback_router
 from profile import router as profile_router
 from scores import router as scores_router
+from sharing import router as sharing_router
 
 
 @asynccontextmanager
@@ -32,7 +33,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_raw_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Always return JSON so the frontend can safely call response.json().
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc) or "Internal Server Error"},
+    )
+
+
+_raw_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
+)
 allowed_origins = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -46,15 +60,21 @@ app.include_router(auth_router)
 app.include_router(scores_router)
 app.include_router(playback_router)
 app.include_router(profile_router)
+app.include_router(sharing_router)
 app.include_router(composer_router)
 
 UPLOAD_DIR = Path("uploads")
 if UPLOAD_DIR.exists():
     app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-STATIC_DIST = Path("static/dist")
-if STATIC_DIST.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIST)), name="static")
+# Vite builds the frontend into ./dist by default.
+# Keep a fallback to ./static/dist for compatibility with older deployments.
+STATIC_DIST_CANDIDATES = [Path("dist"), Path("static/dist")]
+STATIC_DIST = next((path for path in STATIC_DIST_CANDIDATES if path.exists()), Path("dist"))
+
+# Serve compiled assets (e.g. /assets/index-*.js) directly from the build output.
+if STATIC_DIST.exists() and (STATIC_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIST / "assets")), name="assets")
 
 
 @app.get("/health")
@@ -73,12 +93,26 @@ def root():
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_spa(full_path: str):
     index_file = STATIC_DIST / "index.html"
-    api_prefixes = ("auth", "profile", "scores", "playback", "health", "docs", "openapi.json", "uploads")
+    api_prefixes = (
+        "auth",
+        "profile",
+        "scores",
+        "playback",
+        "sharing",
+        "health",
+        "docs",
+        "openapi.json",
+        "uploads",
+        "assets",
+    )
+
     if index_file.exists() and not full_path.startswith(api_prefixes):
         return FileResponse(index_file)
+
     return JSONResponse({"detail": "Not found"}, status_code=404)
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

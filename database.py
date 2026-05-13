@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 SQLITE_PATH = Path(os.environ.get("SCORESYNC_DB", "scoresync.db"))
@@ -70,7 +69,12 @@ class PgConnection:
 
 def _insert_needs_returning_id(sql):
     compact = " ".join(sql.lower().split())
-    return (compact.startswith("insert into users ") or compact.startswith("insert into calibration_sessions ")) and " returning " not in compact
+    prefixes = (
+        "insert into users ",
+        "insert into calibration_sessions ",
+        "insert into shared_scores ",
+    )
+    return compact.startswith(prefixes) and " returning " not in compact
 
 
 def _sqlite_conn():
@@ -94,6 +98,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS calibration_sessions (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, scale_name TEXT NOT NULL, scale_type TEXT NOT NULL, scale_root INTEGER NOT NULL, completed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS calibration_notes (id SERIAL PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE, note_name TEXT NOT NULL, detected_freq DOUBLE PRECISION NOT NULL, cents_deviation DOUBLE PRECISION NOT NULL DEFAULT 0.0, seq_index INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS score_uploads (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, filename TEXT NOT NULL, file_type TEXT NOT NULL, stored_path TEXT NOT NULL, uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS shared_scores (id SERIAL PRIMARY KEY, score_id INTEGER NOT NULL REFERENCES score_uploads(id) ON DELETE CASCADE, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, share_token TEXT UNIQUE NOT NULL, password_hash TEXT, expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, is_active BOOLEAN DEFAULT TRUE);
             """)
         return
     with get_conn() as conn:
@@ -103,4 +108,5 @@ def init_db():
         CREATE TABLE IF NOT EXISTS calibration_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, scale_name TEXT NOT NULL, scale_type TEXT NOT NULL, scale_root INTEGER NOT NULL, completed_at TEXT DEFAULT (datetime('now')));
         CREATE TABLE IF NOT EXISTS calibration_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE, note_name TEXT NOT NULL, detected_freq REAL NOT NULL, cents_deviation REAL NOT NULL DEFAULT 0.0, seq_index INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS score_uploads (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, filename TEXT NOT NULL, file_type TEXT NOT NULL, stored_path TEXT NOT NULL, uploaded_at TEXT DEFAULT (datetime('now')));
+        CREATE TABLE IF NOT EXISTS shared_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, score_id INTEGER NOT NULL REFERENCES score_uploads(id) ON DELETE CASCADE, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, share_token TEXT UNIQUE NOT NULL, password_hash TEXT, expires_at TEXT, created_at TEXT DEFAULT (datetime('now')), is_active INTEGER DEFAULT 1);
         """)
