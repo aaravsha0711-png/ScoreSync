@@ -155,14 +155,8 @@ div[style*='maxWidth'] {
 }
 
 /* Score Reader Stage Mode */
-svg {
-  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.28));
-}
-
-svg[id*='verovio'],
-svg[class*='verovio'],
-img[alt*='score' i],
-canvas {
+svg { filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.28)); }
+svg[id*='verovio'], svg[class*='verovio'], img[alt*='score' i], canvas {
   background: linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.965)) !important;
   border-radius: 18px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), 0 0 60px rgba(0, 217, 255, 0.08);
@@ -190,8 +184,57 @@ button[title*='Loop' i] {
   border-radius: 14px;
 }
 
-input[type='range'] {
-  accent-color: var(--accent);
+input[type='range'] { accent-color: var(--accent); }
+
+/* Calibration Gamification */
+button[title*='calibrat' i],
+button[title*='microphone' i],
+button[title*='tune' i] {
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.2),
+    0 0 32px rgba(16, 185, 129, 0.22),
+    0 10px 30px rgba(16, 185, 129, 0.18);
+}
+
+/* Pitch and calibration panels */
+div:has(input[type='range']) {
+  position: relative;
+}
+
+div:has(input[type='range'])::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      var(--success) 0deg 120deg,
+      var(--accent) 120deg 240deg,
+      var(--accent-2) 240deg 360deg
+    );
+  mask: radial-gradient(circle at center, transparent 56%, black 58%);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 18px rgba(16, 185, 129, 0.18));
+  pointer-events: none;
+}
+
+/* Success and accuracy indicators */
+strong,
+span[style*='color: green'],
+span[style*='color: #10b981'] {
+  text-shadow: 0 0 14px rgba(16, 185, 129, 0.25);
+}
+
+@keyframes pulseRing {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+div:has(input[type='range'])::after {
+  animation: pulseRing 2.4s ease-in-out infinite;
 }
 
 @media (max-width: 1024px) {
@@ -202,4 +245,8 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   body { background-attachment: fixed; }
+  div:has(input[type='range'])::after {
+    width: 64px;
+    height: 64px;
+  }
 }
