@@ -9,9 +9,7 @@ import "./theme.css";
 function MetricCard({ label, value, detail, accent = "var(--accent)" }) {
   return (
     <div className="glass" style={{ padding: 18, position: "relative", overflow: "hidden" }}>
-      <div
-        style={{ position: "absolute", inset: "auto -30px -42px auto", width: 110, height: 110, borderRadius: 999, background: accent, opacity: 0.12, filter: "blur(8px)" }}
-      />
+      <div style={{ position: "absolute", inset: "auto -30px -42px auto", width: 110, height: 110, borderRadius: 999, background: accent, opacity: 0.12, filter: "blur(8px)" }} />
       <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 8 }}>{label}</div>
       <div style={{ fontSize: "1.75rem", fontWeight: 800 }}>{value}</div>
       <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: 4 }}>{detail}</div>
@@ -28,6 +26,7 @@ function DashboardOverview() {
       const el = document.querySelector(selector);
       if (el) {
         el.click();
+        scrollToWorkspace();
         return;
       }
     }
@@ -47,8 +46,18 @@ function DashboardOverview() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
             <button onClick={() => clickFirst(['input[type="file"]'])}>Upload Score</button>
-            <button onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])} style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}>Start Practice</button>
-            <button onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])} style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}>Calibrate Mic</button>
+            <button
+              onClick={() => clickFirst(['button[title*="play" i]', 'button[aria-label*="play" i]'])}
+              style={{ background: "var(--surface-strong)", color: "var(--text)", border: "1px solid var(--border)" }}
+            >
+              Start Practice
+            </button>
+            <button
+              onClick={() => clickFirst(['button[title*="calibrat" i]', 'button[title*="microphone" i]', 'button[aria-label*="calibrat" i]'])}
+              style={{ background: "rgba(16,185,129,0.16)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}
+            >
+              Calibrate Mic
+            </button>
           </div>
         </div>
 
@@ -95,23 +104,19 @@ function BottomTabBar({ onMenu, onFullscreen }) {
   const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
-    <nav
-      className="glass"
-      style={{
-        position: "fixed",
-        left: 12,
-        right: 12,
-        bottom: 12,
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "center",
-        padding: 6,
-        borderRadius: 24,
-      }}
-    >
+    <nav className="glass" style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 1000, display: "flex", alignItems: "center", padding: 6, borderRadius: 24 }}>
       <button style={tabStyle} onClick={() => scrollTo("scoresync-dashboard")} aria-label="Dashboard">🏠<span>Home</span></button>
       <button style={tabStyle} onClick={() => scrollTo("scoresync-workspace")} aria-label="Scores">🎼<span>Score</span></button>
-      <button style={tabStyle} onClick={() => document.querySelector('button[title*="play" i], button[aria-label*="play" i]')?.click()} aria-label="Practice">▶️<span>Practice</span></button>
+      <button
+        style={tabStyle}
+        onClick={() => {
+          scrollTo("scoresync-workspace");
+          document.querySelector('button[title*="play" i], button[aria-label*="play" i]')?.click();
+        }}
+        aria-label="Practice"
+      >
+        ▶️<span>Practice</span>
+      </button>
       <button style={tabStyle} onClick={onFullscreen} aria-label="Full screen">⛶<span>Focus</span></button>
       <button style={tabStyle} onClick={onMenu} aria-label="Menu">☰<span>Menu</span></button>
     </nav>
@@ -143,10 +148,7 @@ function StudioShell({ children }) {
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16, padding: isFullscreen ? 0 : 16, paddingBottom: isFullscreen ? 0 : 110 }}>
       {!isFullscreen && (
         <header className="glass" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Workspace</div>
-            <div style={{ fontWeight: 700 }}>Professional Practice Environment</div>
-          </div>
+          <div><div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Workspace</div><div style={{ fontWeight: 700 }}>Professional Practice Environment</div></div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={toggleFullscreen} style={{ minWidth: 44, minHeight: 44 }} aria-label="Enter full screen">⛶</button>
             <button onClick={() => setMenuOpen((v) => !v)} style={{ minWidth: 44, minHeight: 44 }} aria-label="Toggle menu">☰</button>
@@ -167,11 +169,7 @@ function StudioShell({ children }) {
         <main style={{ minWidth: 0 }}>
           {!isFullscreen && <div id="scoresync-dashboard"><DashboardOverview /></div>}
           <div id="scoresync-workspace" className="glass" style={{ padding: 20, minHeight: isFullscreen ? "100vh" : "calc(100vh - 120px)", borderRadius: isFullscreen ? 0 : undefined }}>
-            {isFullscreen && (
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <button onClick={toggleFullscreen} aria-label="Exit full screen">Exit Full Screen</button>
-              </div>
-            )}
+            {isFullscreen && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}><button onClick={toggleFullscreen} aria-label="Exit full screen">Exit Full Screen</button></div>}
             {children}
           </div>
         </main>
