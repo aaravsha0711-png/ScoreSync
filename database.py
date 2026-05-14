@@ -73,6 +73,7 @@ def _insert_needs_returning_id(sql):
         "insert into users ",
         "insert into calibration_sessions ",
         "insert into shared_scores ",
+        "insert into compositions ",
     )
     return compact.startswith(prefixes) and " returning " not in compact
 

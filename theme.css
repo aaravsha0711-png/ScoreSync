@@ -1,50 +1,263 @@
 :root {
-  color-scheme: light;
-  --bg: #ffffff;
-  --text: #111827;
-  --surface: #f9fafb;
-  --border: #d1d5db;
-  --accent: #c9a84c;
-}
-
-:root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #111827;
-  --text: #f9fafb;
-  --surface: #1f2937;
-  --border: #374151;
-  --accent: #d9b95a;
+
+  --bg: #0a0d14;
+  --bg-secondary: #121826;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+
+  --surface: rgba(255, 255, 255, 0.06);
+  --surface-strong: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.12);
+
+  --accent: #00d9ff;
+  --accent-2: #8b5cf6;
+  --success: #10b981;
+  --warning: #f59e0b;
+
+  --radius: 18px;
+  --radius-lg: 24px;
+
+  --shadow-glow: 0 0 40px rgba(0, 217, 255, 0.12);
+  --shadow-panel: 0 20px 50px rgba(0, 0, 0, 0.35);
 }
 
-html, body, #root {
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100%;
-  margin: 0;
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f3f6fb;
+  --bg-secondary: #e8eef9;
+  --text: #0f172a;
+  --text-muted: #475569;
+
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --border: rgba(15, 23, 42, 0.08);
+
+  --accent: #0891b2;
+  --accent-2: #7c3aed;
+
+  --shadow-glow: 0 0 30px rgba(8, 145, 178, 0.08);
+  --shadow-panel: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
+
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; margin: 0; }
 
 body {
+  background:
+    radial-gradient(circle at 15% 20%, rgba(139, 92, 246, 0.14), transparent 35%),
+    radial-gradient(circle at 85% 25%, rgba(0, 217, 255, 0.10), transparent 30%),
+    radial-gradient(circle at 50% 80%, rgba(16, 185, 129, 0.06), transparent 30%),
+    linear-gradient(180deg, var(--bg), var(--bg-secondary));
+  color: var(--text);
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  overflow-x: hidden;
 }
 
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black 35%, transparent 85%);
+}
+
+#root { position: relative; }
+
 button, input, textarea, select {
-  background: var(--surface);
+  font: inherit;
   color: var(--text);
   border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+input, textarea, select {
+  background: var(--surface);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 0.75rem 0.9rem;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: rgba(0, 217, 255, 0.5);
+  box-shadow: 0 0 0 4px rgba(0, 217, 255, 0.12);
 }
 
 button {
   cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  border: none;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 217, 255, 0.18);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(0, 217, 255, 0.22);
+}
+
+button:active { transform: translateY(0); }
+button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+.glass, .theme-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-panel), var(--shadow-glow);
 }
 
 .theme-toggle {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.85rem;
   border-radius: 999px;
 }
 
-a {
-  color: var(--accent);
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { letter-spacing: -0.02em; }
+::selection { background: rgba(0, 217, 255, 0.22); }
+
+/* Authentication and onboarding polish */
+div[style*='min-height'][style*='justify-content: center'],
+div[style*='minHeight'][style*='justifyContent'] {
+  background:
+    radial-gradient(circle at 10% 15%, rgba(0, 217, 255, 0.22), transparent 26%),
+    radial-gradient(circle at 90% 20%, rgba(139, 92, 246, 0.20), transparent 28%),
+    radial-gradient(circle at 50% 100%, rgba(16, 185, 129, 0.10), transparent 28%),
+    linear-gradient(135deg, #070a12, #121826 55%, #0a0d14) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  padding: clamp(24px, 5vw, 64px) !important;
+}
+
+/* Premium auth card */
+div[style*='max-width'],
+div[style*='maxWidth'] {
+  background: linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.045)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  backdrop-filter: blur(22px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.15) !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45), 0 0 60px rgba(0, 217, 255, 0.12) !important;
+}
+
+/* Score Reader Stage Mode */
+svg { filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.28)); }
+svg[id*='verovio'], svg[class*='verovio'], img[alt*='score' i], canvas {
+  background: linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.965)) !important;
+  border-radius: 18px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), 0 0 60px rgba(0, 217, 255, 0.08);
+}
+
+div:has(svg[id*='verovio']),
+div:has(svg[class*='verovio']),
+div:has(img[alt*='score' i]),
+div:has(canvas) {
+  position: relative;
+  padding: 24px !important;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top center, rgba(255,255,255,0.05), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)) !important;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+button[title*='Play' i],
+button[title*='Pause' i],
+button[title*='Stop' i],
+button[title*='Loop' i] {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 14px;
+}
+
+input[type='range'] { accent-color: var(--accent); }
+
+/* Calibration Gamification */
+button[title*='calibrat' i],
+button[title*='microphone' i],
+button[title*='tune' i] {
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.2),
+    0 0 32px rgba(16, 185, 129, 0.22),
+    0 10px 30px rgba(16, 185, 129, 0.18);
+}
+
+div:has(input[type='range']) {
+  position: relative;
+}
+
+div:has(input[type='range'])::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--success) 0deg 120deg,
+    var(--accent) 120deg 240deg,
+    var(--accent-2) 240deg 360deg
+  );
+  mask: radial-gradient(circle at center, transparent 56%, black 58%);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 18px rgba(16, 185, 129, 0.18));
+  pointer-events: none;
+  animation: pulseRing 2.4s ease-in-out infinite;
+}
+
+strong,
+span[style*='color: green'],
+span[style*='color: #10b981'] {
+  text-shadow: 0 0 14px rgba(16, 185, 129, 0.25);
+}
+
+@keyframes pulseRing {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@media (max-width: 1024px) {
+  div[style*='grid-template-columns: 260px 1fr'] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    background-attachment: fixed;
+  }
+
+  /* Disable decorative tuner overlay so controls remain tappable */
+  div:has(input[type='range'])::after {
+    display: none !important;
+  }
+
+  /* Reduce extra padding around score content */
+  div:has(svg[id*='verovio']),
+  div:has(svg[class*='verovio']),
+  div:has(img[alt*='score' i]),
+  div:has(canvas) {
+    padding: 12px !important;
+  }
+
+  /* Keep buttons above decorative layers */
+  button {
+    position: relative;
+    z-index: 2;
+  }
 }
