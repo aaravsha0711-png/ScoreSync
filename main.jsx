@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import App from "./score-reader-functional.jsx";
+import App from "./App.jsx";
 import SharedScorePage from "./SharedScorePage.jsx";
 import GlobalControls from "./GlobalControls.jsx";
 import { ThemeProvider } from "./theme.jsx";

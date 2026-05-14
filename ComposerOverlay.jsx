@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiRequest } from "./api.js";
-import "../audioPlayback.js"; // side-effect: wires window.__playComposition
+import "./audioPlayback.js"; // side-effect: wires window.__playComposition
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

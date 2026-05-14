@@ -10,6 +10,7 @@ export default defineConfig({
       "/profile": "http://127.0.0.1:8000",
       "/scores": "http://127.0.0.1:8000",
       "/playback": "http://127.0.0.1:8000",
+      "/composer": "http://127.0.0.1:8000",
       "/health": "http://127.0.0.1:8000"
     }
   },
