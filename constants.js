@@ -1,0 +1,76 @@
+// constants.js — Shared constants
+
+export const MIN_NOTE_STABILITY_MS = 80;
+
+export const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+export const MAJOR_SCALES = [
+  { name:"C Major",  notes:[0,2,4,5,7,9,11,12] },
+  { name:"G Major",  notes:[7,9,11,0,2,4,6,7] },
+  { name:"D Major",  notes:[2,4,6,7,9,11,1,2] },
+  { name:"F Major",  notes:[5,7,9,10,0,2,4,5] },
+  { name:"Bb Major", notes:[10,0,2,3,5,7,9,10] },
+];
+
+export const MEYER_SCALES = [
+  { name:"Meyer V1", notes:[0,2,4,5,7,9,11,12] },
+  { name:"Meyer V2", notes:[0,2,3,5,7,9,10,12] },
+  { name:"Meyer V3", notes:[0,2,4,6,7,9,11,12] },
+];
+
+export const TRANSPOSITIONS = {
+  "Concert (C)":          0,
+  "Piccolo":              12,
+  "Flute":                0,
+  "Alto Flute":          -5,
+  "Oboe":                 0,
+  "English Horn":        -7,
+  "Bassoon":              0,
+  "Contrabassoon":        0,
+  "Piano":                0,
+  "Organ":                0,
+  "Harp":                 0,
+  "Harpsichord":          0,
+  "Celesta":             12,
+  "Xylophone":           12,
+  "Marimba":              0,
+  "Vibraphone":           0,
+  "Glockenspiel":        24,
+  "Violin":               0,
+  "Viola":                0,
+  "Cello":                0,
+  "Double Bass":          0,
+  "Guitar":               0,
+  "Bass Guitar":          0,
+  "Bb Trumpet":           2,
+  "Bb Cornet":            2,
+  "Flugelhorn":           2,
+  "Bb Clarinet":          2,
+  "Bb Bass Clarinet":    14,
+  "Bass Clarinet (Bb)":  14,
+  "Bb Soprano Sax":       2,
+  "Bb Tenor Sax":        14,
+  "Soprano Recorder":     0,
+  "Eb Trumpet":          -3,
+  "Eb Alto Sax":          3,
+  "Eb Baritone Sax":     -9,
+  "Eb Clarinet":          3,
+  "F Horn":               7,
+  "French Horn":          7,
+  "Mellophone":           7,
+  "Trombone":             0,
+  "Bass Trombone":        0,
+  "Alto Trombone":        0,
+  "Tenor Trombone":       0,
+  "Euphonium":            0,
+  "Euphonium (Treble)": -14,
+  "Baritone (Treble)":  -14,
+  "Tuba":                 0,
+  "Contrabass Tuba":      0,
+  "Sousaphone":           0,
+  "Bugle":                2,
+  "Drum Kit":             0,
+  "Mallet Percussion":    0,
+  "Timpani":              0,
+  "Snare Drum":           0,
+};
