@@ -948,10 +948,18 @@ def _composition_to_musicxml(comp: dict, parts: list[dict]) -> str:
 # Auth helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _user_id(user) -> int:
+    """Accept both dict users (tests) and ORM users."""
+    if isinstance(user, dict):
+        return user["id"]
+    return user.id
+
+
 def _assert_owns(comp_id: int, user) -> None:
+    uid = _user_id(user)
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM compositions WHERE id=? AND user_id=?", (comp_id, user.id)
+            "SELECT id FROM compositions WHERE id=? AND user_id=?", (comp_id, uid)
         ).fetchone()
     if not row:
         raise HTTPException(403, "Not authorized or composition not found")
@@ -979,19 +987,20 @@ def list_styles():
 
 @router.post("/compositions", status_code=201)
 def create_composition(body: CompositionCreate, user=Depends(get_current_user)):
+    uid = _user_id(user)
     sections_json = json.dumps(body.sections if body.sections else DEFAULT_SECTIONS)
     if DATABASE_URL:
         with get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO compositions (user_id, title, key, mode, tempo, time_signature, measures, style, sections_json) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (user.id, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json)
+                (uid, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json)
             )
             comp_id = cur.lastrowid
     else:
         with get_conn() as conn:
             cur = conn.execute(
                 "INSERT INTO compositions (user_id, title, key, mode, tempo, time_signature, measures, style, sections_json) VALUES (?,?,?,?,?,?,?,?,?)",
-                (user.id, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json)
+                (uid, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json)
             )
             comp_id = cur.lastrowid
     return {"id": comp_id, "title": body.title}
@@ -999,19 +1008,21 @@ def create_composition(body: CompositionCreate, user=Depends(get_current_user)):
 
 @router.get("/compositions")
 def list_compositions(user=Depends(get_current_user)):
+    uid = _user_id(user)
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT id, title, key, mode, tempo, time_signature, measures, style, created_at FROM compositions WHERE user_id=? ORDER BY updated_at DESC",
-            (user.id,)
+            (uid,)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 @router.get("/compositions/{comp_id}")
 def get_composition(comp_id: int, user=Depends(get_current_user)):
+    uid = _user_id(user)
     with get_conn() as conn:
         comp = conn.execute(
-            "SELECT * FROM compositions WHERE id=? AND user_id=?", (comp_id, user.id)
+            "SELECT * FROM compositions WHERE id=? AND user_id=?", (comp_id, uid)
         ).fetchone()
         if not comp:
             raise HTTPException(404, "Composition not found")
@@ -1041,26 +1052,28 @@ def get_composition(comp_id: int, user=Depends(get_current_user)):
 @router.put("/compositions/{comp_id}")
 def update_composition(comp_id: int, body: CompositionCreate, user=Depends(get_current_user)):
     _assert_owns(comp_id, user)
+    uid = _user_id(user)
     sections_json = json.dumps(body.sections if body.sections else DEFAULT_SECTIONS)
     if DATABASE_URL:
         with get_conn() as conn:
             conn.execute(
                 "UPDATE compositions SET title=%s, key=%s, mode=%s, tempo=%s, time_signature=%s, measures=%s, style=%s, sections_json=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s AND user_id=%s",
-                (body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json, comp_id, user.id)
+                (body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json, comp_id, uid)
             )
     else:
         with get_conn() as conn:
             conn.execute(
                 "UPDATE compositions SET title=?, key=?, mode=?, tempo=?, time_signature=?, measures=?, style=?, sections_json=?, updated_at=datetime('now') WHERE id=? AND user_id=?",
-                (body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json, comp_id, user.id)
+                (body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sections_json, comp_id, uid)
             )
     return {"ok": True}
 
 
 @router.delete("/compositions/{comp_id}", status_code=204)
 def delete_composition(comp_id: int, user=Depends(get_current_user)):
+    uid = _user_id(user)
     with get_conn() as conn:
-        conn.execute("DELETE FROM compositions WHERE id=? AND user_id=?", (comp_id, user.id))
+        conn.execute("DELETE FROM compositions WHERE id=? AND user_id=?", (comp_id, uid))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Routes — Parts
@@ -1155,12 +1168,13 @@ def save_piano_roll(comp_id: int, body: PianoRollData, user=Depends(get_current_
 @router.post("/compositions/{comp_id}/samples", status_code=201)
 def add_sample(comp_id: int, body: SampleData, user=Depends(get_current_user)):
     _assert_owns(comp_id, user)
+    uid = _user_id(user)
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO samples (composition_id, user_id, name, source_type, source_url,
                layer_role, start_measure, end_measure, volume, loop)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (comp_id, user.id, body.name, body.source_type, body.source_url,
+            (comp_id, uid, body.name, body.source_type, body.source_url,
              body.layer_role, body.start_measure, body.end_measure,
              body.volume, 1 if body.loop else 0)
         )
@@ -1179,6 +1193,7 @@ async def upload_sample(
     user=Depends(get_current_user)
 ):
     _assert_owns(comp_id, user)
+    uid = _user_id(user)
     uploads_dir = "uploads"
     os.makedirs(uploads_dir, exist_ok=True)
     ext = os.path.splitext(file.filename or "sample.wav")[1] or ".wav"
@@ -1192,7 +1207,7 @@ async def upload_sample(
             """INSERT INTO samples (composition_id, user_id, name, source_type, file_path,
                layer_role, start_measure, volume, loop)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            (comp_id, user.id, file.filename or filename, "upload", file_path,
+            (comp_id, uid, file.filename or filename, "upload", file_path,
              layer_role, start_measure, volume, 1 if loop else 0)
         )
         sample_id = cur.lastrowid
@@ -1324,9 +1339,10 @@ def gen_all(body: GenerateRequest, user=Depends(get_current_user)):
 
 @router.get("/compositions/{comp_id}/export_xml")
 def export_xml(comp_id: int, user=Depends(get_current_user)):
+    uid = _user_id(user)
     with get_conn() as conn:
         comp = conn.execute(
-            "SELECT * FROM compositions WHERE id=? AND user_id=?", (comp_id, user.id)
+            "SELECT * FROM compositions WHERE id=? AND user_id=?", (comp_id, uid)
         ).fetchone()
         if not comp:
             raise HTTPException(404, "Not found")
