@@ -16,9 +16,17 @@ from pydantic import BaseModel
 
 from deps import get_current_user
 from transposition import TRANSPOSITION_MAP, semitones_for
-from database import get_conn
+from database import get_conn, IS_PG
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+def _ph() -> str:
+    return "%s" if IS_PG else "?"
+
+
+def _now() -> str:
+    return "CURRENT_TIMESTAMP" if IS_PG else "datetime('now')"
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -49,9 +57,10 @@ class CalibrationRequest(BaseModel):
 
 @router.get("")
 def get_profile(current_user: dict = Depends(get_current_user)):
+    ph = _ph()
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = ?",
+            f"SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = {ph}",
             (current_user["id"],),
         ).fetchone()
     if not row:
@@ -75,18 +84,22 @@ def set_instrument(
             detail=f"Unknown instrument. Valid options: {list(TRANSPOSITION_MAP.keys())}",
         )
     semitones = semitones_for(body.instrument)
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO profiles (user_id, instrument, transposition)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                instrument=excluded.instrument,
-                transposition=excluded.transposition,
-                updated_at=datetime('now')
-            """,
-            (current_user["id"], body.instrument, semitones),
+    ph = _ph()
+    ts = _now()
+    if IS_PG:
+        upsert = (
+            f"INSERT INTO profiles (user_id, instrument, transposition) VALUES ({ph},{ph},{ph}) "
+            f"ON CONFLICT(user_id) DO UPDATE SET instrument=EXCLUDED.instrument, "
+            f"transposition=EXCLUDED.transposition, updated_at={ts}"
         )
+    else:
+        upsert = (
+            f"INSERT INTO profiles (user_id, instrument, transposition) VALUES ({ph},{ph},{ph}) "
+            f"ON CONFLICT(user_id) DO UPDATE SET instrument=excluded.instrument, "
+            f"transposition=excluded.transposition, updated_at={ts}"
+        )
+    with get_conn() as conn:
+        conn.execute(upsert, (current_user["id"], body.instrument, semitones))
     return {
         "instrument": body.instrument,
         "transposition_semitones": semitones,
@@ -104,46 +117,32 @@ def save_calibration(
     body: CalibrationRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Store all calibration sessions for this user.
-    Previous sessions are cleared and replaced (idempotent recalibration).
-    Also computes and stores per-note cent-deviation statistics.
-    """
+    """Store all calibration sessions (idempotent — clears old data first)."""
     user_id = current_user["id"]
+    ph = _ph()
+    ts = _now()
     with get_conn() as conn:
-        # Clear old sessions
         old_sessions = conn.execute(
-            "SELECT id FROM calibration_sessions WHERE user_id = ?", (user_id,)
+            f"SELECT id FROM calibration_sessions WHERE user_id = {ph}", (user_id,)
         ).fetchall()
         for s in old_sessions:
-            conn.execute("DELETE FROM calibration_notes WHERE session_id = ?", (s["id"],))
-        conn.execute("DELETE FROM calibration_sessions WHERE user_id = ?", (user_id,))
+            conn.execute(f"DELETE FROM calibration_notes WHERE session_id = {ph}", (s["id"],))
+        conn.execute(f"DELETE FROM calibration_sessions WHERE user_id = {ph}", (user_id,))
 
-        # Insert new sessions
         for sess in body.sessions:
             cur = conn.execute(
-                """
-                INSERT INTO calibration_sessions
-                    (user_id, scale_name, scale_type, scale_root)
-                VALUES (?, ?, ?, ?)
-                """,
+                f"INSERT INTO calibration_sessions (user_id, scale_name, scale_type, scale_root) VALUES ({ph},{ph},{ph},{ph})",
                 (user_id, sess.scale_name, sess.scale_type, sess.scale_root),
             )
             session_id = cur.lastrowid
             for note in sess.notes:
                 conn.execute(
-                    """
-                    INSERT INTO calibration_notes
-                        (session_id, note_name, detected_freq, cents_deviation, seq_index)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (session_id, note.note_name, note.detected_freq,
-                     note.cents_deviation, note.seq_index),
+                    f"INSERT INTO calibration_notes (session_id, note_name, detected_freq, cents_deviation, seq_index) VALUES ({ph},{ph},{ph},{ph},{ph})",
+                    (session_id, note.note_name, note.detected_freq, note.cents_deviation, note.seq_index),
                 )
 
-        # Mark profile as calibrated
         conn.execute(
-            "UPDATE profiles SET calibrated=1, updated_at=datetime('now') WHERE user_id=?",
+            f"UPDATE profiles SET calibrated=1, updated_at={ts} WHERE user_id={ph}",
             (user_id,),
         )
 
@@ -155,30 +154,20 @@ def save_calibration(
 
 @router.get("/calibration")
 def get_calibration(current_user: dict = Depends(get_current_user)):
-    """
-    Return calibration statistics:
-    - Per-scale completion
-    - Average cents deviation per note name
-    - Overall tuning tendency (sharp/flat/centre)
-    """
     user_id = current_user["id"]
+    ph = _ph()
     with get_conn() as conn:
         sessions = conn.execute(
-            "SELECT id, scale_name, scale_type, scale_root FROM calibration_sessions WHERE user_id=?",
+            f"SELECT id, scale_name, scale_type, scale_root FROM calibration_sessions WHERE user_id={ph}",
             (user_id,),
         ).fetchall()
 
         if not sessions:
             return {"calibrated": False, "sessions": [], "tuning_tendency": None}
 
-        # Aggregate cents deviations per note
         all_notes = conn.execute(
-            """
-            SELECT cn.note_name, cn.cents_deviation
-            FROM calibration_notes cn
-            JOIN calibration_sessions cs ON cn.session_id = cs.id
-            WHERE cs.user_id = ?
-            """,
+            f"SELECT cn.note_name, cn.cents_deviation FROM calibration_notes cn "
+            f"JOIN calibration_sessions cs ON cn.session_id = cs.id WHERE cs.user_id = {ph}",
             (user_id,),
         ).fetchall()
 
@@ -212,14 +201,16 @@ def get_calibration(current_user: dict = Depends(get_current_user)):
 @router.delete("/calibration", status_code=status.HTTP_204_NO_CONTENT)
 def clear_calibration(current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
+    ph = _ph()
+    ts = _now()
     with get_conn() as conn:
         old = conn.execute(
-            "SELECT id FROM calibration_sessions WHERE user_id=?", (user_id,)
+            f"SELECT id FROM calibration_sessions WHERE user_id={ph}", (user_id,)
         ).fetchall()
         for s in old:
-            conn.execute("DELETE FROM calibration_notes WHERE session_id=?", (s["id"],))
-        conn.execute("DELETE FROM calibration_sessions WHERE user_id=?", (user_id,))
+            conn.execute(f"DELETE FROM calibration_notes WHERE session_id={ph}", (s["id"],))
+        conn.execute(f"DELETE FROM calibration_sessions WHERE user_id={ph}", (user_id,))
         conn.execute(
-            "UPDATE profiles SET calibrated=0, updated_at=datetime('now') WHERE user_id=?",
+            f"UPDATE profiles SET calibrated=0, updated_at={ts} WHERE user_id={ph}",
             (user_id,),
         )

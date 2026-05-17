@@ -30,7 +30,7 @@ from musescore_converter import (
     is_available as musescore_available,
     ConversionError,
 )
-from database import get_conn
+from database import get_conn, IS_PG
 
 router = APIRouter(prefix="/scores", tags=["scores"])
 
@@ -77,8 +77,9 @@ def _save_upload(user_id, filename, file_type, data):
         stored_path_obj.write_bytes(data)
         stored_path = str(stored_path_obj)
     with get_conn() as conn:
+        ph = "%s" if IS_PG else "?"
         conn.execute(
-            "INSERT INTO score_uploads (user_id, filename, file_type, stored_path) VALUES (?,?,?,?)",
+            f"INSERT INTO score_uploads (user_id, filename, file_type, stored_path) VALUES ({ph},{ph},{ph},{ph})",
             (user_id, filename, file_type, stored_path),
         )
     return stored_path
@@ -295,7 +296,7 @@ async def transpose_score(
     # Look up user's instrument
     with get_conn() as conn:
         prof = conn.execute(
-            "SELECT instrument, transposition FROM profiles WHERE user_id=?",
+            f"SELECT instrument, transposition FROM profiles WHERE user_id={'%s' if IS_PG else '?'}",
             (current_user["id"],),
         ).fetchone()
 

@@ -4,7 +4,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, field_validator
 
-from database import get_conn
+from database import get_conn, IS_PG
 from deps import get_current_user
 from security import create_access_token, hash_password, verify_password
 
@@ -50,21 +50,29 @@ def _set_auth_cookie(response: Response, token: str):
 
 @router.post("/register", response_model=AuthUserResponse, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterRequest, response: Response):
+    ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
-        existing = conn.execute("SELECT id FROM users WHERE email = ?", (body.email,)).fetchone()
+        existing = conn.execute(f"SELECT id FROM users WHERE email = {ph}", (body.email,)).fetchone()
         if existing:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with that email already exists.")
-        cursor = conn.execute("INSERT INTO users (email, name, hashed_pw) VALUES (?, ?, ?)", (body.email, body.name, hash_password(body.password)))
+        cursor = conn.execute(
+            f"INSERT INTO users (email, name, hashed_pw) VALUES ({ph},{ph},{ph})",
+            (body.email, body.name, hash_password(body.password))
+        )
         user_id = cursor.lastrowid
-        conn.execute("INSERT INTO profiles (user_id, instrument, transposition) VALUES (?, ?, ?)", (user_id, "Concert (C)", 0))
+        conn.execute(
+            f"INSERT INTO profiles (user_id, instrument, transposition) VALUES ({ph},{ph},{ph})",
+            (user_id, "Concert (C)", 0)
+        )
     _set_auth_cookie(response, create_access_token(body.email))
     return AuthUserResponse(user_id=user_id, email=body.email, name=body.name)
 
 
 @router.post("/login", response_model=AuthUserResponse)
 def login(body: LoginRequest, response: Response):
+    ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
-        row = conn.execute("SELECT id, email, name, hashed_pw FROM users WHERE email = ?", (body.email,)).fetchone()
+        row = conn.execute(f"SELECT id, email, name, hashed_pw FROM users WHERE email = {ph}", (body.email,)).fetchone()
     if not row or not verify_password(body.password, row["hashed_pw"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password.")
     _set_auth_cookie(response, create_access_token(row["email"]))
@@ -78,6 +86,7 @@ def logout(response: Response):
 
 @router.get("/me")
 def me(current_user: dict = Depends(get_current_user)):
+    ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
-        profile = conn.execute("SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = ?", (current_user["id"],)).fetchone()
+        profile = conn.execute(f"SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = {ph}", (current_user["id"],)).fetchone()
     return {**current_user, "profile": dict(profile) if profile else None}

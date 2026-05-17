@@ -2,7 +2,7 @@
 from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from database import get_conn
+from database import get_conn, IS_PG
 from security import decode_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -16,7 +16,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     if not email:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token", headers={"WWW-Authenticate": "Bearer"})
     with get_conn() as conn:
-        row = conn.execute("SELECT id, email, name FROM users WHERE email = ?", (email,)).fetchone()
+        row = conn.execute(f"SELECT id, email, name FROM users WHERE email = {'%s' if IS_PG else '?'}", (email,)).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return dict(row)
