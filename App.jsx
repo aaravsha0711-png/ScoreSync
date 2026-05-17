@@ -440,6 +440,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [settings, setSettings] = useState({
     stopAtWrongNote: true,
     loopOnWrongNote: false,
+    pauseOnSilence: false,
     metronomeSource: "backend",
     metronomeEnabled: false,
     restAlertEnabled: true,
@@ -672,9 +673,9 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
 
   // ── Voice recognition ─────────────────────────────────────────────────────
   useEffect(() => {
-    let recognition = null;
+    let voiceHandle = null;
     if (settings.voiceMeasureJumpEnabled && isListening) {
-      recognition = startVoiceRecognition((measureNumber) => {
+      voiceHandle = startVoiceRecognition((measureNumber) => {
         const targetMeasure = Math.max(1, measureNumber + 4);
         setCurrentMeasure(targetMeasure);
         setIsAutoScrollPaused(false);
@@ -684,10 +685,10 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       });
       setVoiceRecognitionActive(true);
     } else {
-      if (recognition) recognition.stop();
+      if (voiceHandle) voiceHandle.stop();
       setVoiceRecognitionActive(false);
     }
-    return () => { if (recognition) recognition.stop(); };
+    return () => { if (voiceHandle) voiceHandle.stop(); };
   }, [settings.voiceMeasureJumpEnabled, isListening, beginWakeWordResume, scrollToMeasure]);
 
   // ── Marking suggestions ───────────────────────────────────────────────────
@@ -1293,6 +1294,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
               {[
                 ["stopAtWrongNote",          "Stop on wrong note"],
                 ["loopOnWrongNote",          "Loop on wrong note"],
+                ["pauseOnSilence",           "Pause scroll on silence"],
                 ["metronomeEnabled",         "Enable metronome"],
                 ["restAlertEnabled",         "Rest alerts"],
                 ["markingSuggestionsEnabled","Marking suggestions"],
@@ -1341,7 +1343,7 @@ function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       <audio ref={audioElementRef} style={{ display:"none" }}/>
 
       {/* Composer overlay */}
-      {showComposer && <ComposerOverlay userId={user.id} onClose={() => setShowComposer(false)} />}
+      {showComposer && <ComposerOverlay onClose={() => setShowComposer(false)} />}
     </div>
   );
 }

@@ -8,6 +8,7 @@ export function startVoiceRecognition(onMeasureJump, onWakeWord) {
   recognition.continuous = true;
   recognition.interimResults = false;
   recognition.lang = "en-US";
+  let _stopped = false;
 
   recognition.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -31,9 +32,19 @@ export function startVoiceRecognition(onMeasureJump, onWakeWord) {
     }
   };
 
-  recognition.onerror = () => {};
-  recognition.onend = () => { try { recognition.start(); } catch (_) {} };
+  recognition.onerror = (e) => {
+    // Ignore no-speech errors; stop on fatal errors to avoid restart loops
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") _stopped = true;
+  };
+  recognition.onend = () => {
+    if (!_stopped) { try { recognition.start(); } catch (_) {} }
+  };
 
   try { recognition.start(); } catch (_) {}
-  return recognition;
+
+  // Return a handle so the caller can stop cleanly without triggering restart
+  return {
+    stop() { _stopped = true; try { recognition.stop(); } catch (_) {} },
+    recognition,
+  };
 }

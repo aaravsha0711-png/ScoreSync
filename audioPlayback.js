@@ -82,7 +82,11 @@ export function playCompositionPreview(comp, onEnd) {
     const pat = comp.drum_pattern.pattern || {};
     const steps = comp.drum_pattern.steps || 16;
     const secPerStep = secPerBeat / 4;
-    const totalSteps = comp.measures * steps;
+    // Derive measure count from sections (multi-section songs) or flat measures field
+    const derivedMeasures = (comp.sections && comp.sections.length)
+      ? comp.sections.reduce((s, sec) => s + (sec.measures || 8), 0)
+      : (comp.measures || 8);
+    const totalSteps = derivedMeasures * steps;
     Object.entries(pat).forEach(([rowId, arr]) => {
       for (let step = 0; step < totalSteps; step++) {
         if (arr[step % arr.length] !== 1) continue;
