@@ -33,3 +33,10 @@ class LoRAAdapterRecord(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
     print("✅ Database initialized (PostgreSQL / SQLite)")
+
+def get_conn():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
