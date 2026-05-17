@@ -6,3 +6,4 @@ boto3
 numpy
 SQLAlchemy==2.0.36
 python-jose[cryptography]
+passlib[bcrypt]
