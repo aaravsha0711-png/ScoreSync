@@ -19,7 +19,7 @@ class TrainingSession(Base):
     repeat_count = Column(Integer)
     duration_seconds = Column(Integer)
     error_types = Column(JSON)
-    metadata = Column(JSON)
+    session_metadata = Column("metadata", JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class LoRAAdapterRecord(Base):
