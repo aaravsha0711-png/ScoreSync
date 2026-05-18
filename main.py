@@ -47,6 +47,13 @@ _raw_origins = os.environ.get(
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
 )
 allowed_origins = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
+
+# Automatically include common deployment URLs when present.
+for env_name in ("FRONTEND_URL", "PUBLIC_FRONTEND_URL", "RENDER_EXTERNAL_URL"):
+    value = os.environ.get(env_name, "").strip()
+    if value and value not in allowed_origins:
+        allowed_origins.append(value)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
