@@ -17,10 +17,15 @@ class ShareRequest(BaseModel):
     expires_in_days: int = 30
 
 
+def _active_value():
+    return True if IS_PG else 1
+
+
 def _create_share_for_score(score_id: int, user_id: int, expires_in_days: int):
     token = secrets.token_urlsafe(24)
     expires_at = (datetime.utcnow() + timedelta(days=max(1, expires_in_days))).isoformat()
     ph = "%s" if IS_PG else "?"
+    active = _active_value()
 
     with get_conn() as conn:
         score = conn.execute(
@@ -31,15 +36,15 @@ def _create_share_for_score(score_id: int, user_id: int, expires_in_days: int):
             raise HTTPException(status_code=404, detail="Score not found")
 
         existing = conn.execute(
-            f"SELECT share_token FROM shared_scores WHERE score_id = {ph} AND is_active = 1",
-            (score_id,),
+            f"SELECT share_token FROM shared_scores WHERE score_id = {ph} AND is_active = {ph}",
+            (score_id, active),
         ).fetchone()
         if existing:
             return {"token": existing["share_token"], "url": f"/shared/{existing['share_token']}"}
 
         conn.execute(
-            f"INSERT INTO shared_scores (score_id, owner_id, share_token, expires_at, is_active) VALUES ({ph},{ph},{ph},{ph},1)",
-            (score_id, user_id, token, expires_at),
+            f"INSERT INTO shared_scores (score_id, owner_id, share_token, expires_at, is_active) VALUES ({ph},{ph},{ph},{ph},{ph})",
+            (score_id, user_id, token, expires_at, active),
         )
 
     return {"token": token, "url": f"/shared/{token}", "expires_at": expires_at}
@@ -69,13 +74,14 @@ def create_share_for_latest_score(payload: ShareRequest, user=Depends(get_curren
 @router.get("/{token}")
 def get_shared_score(token: str):
     ph = "%s" if IS_PG else "?"
+    active = _active_value()
     with get_conn() as conn:
         row = conn.execute(
             f"""SELECT s.id, s.filename, s.file_type, s.stored_path, sh.expires_at
             FROM shared_scores sh
             JOIN score_uploads s ON s.id = sh.score_id
-            WHERE sh.share_token = {ph} AND sh.is_active = 1""",
-            (token,),
+            WHERE sh.share_token = {ph} AND sh.is_active = {ph}""",
+            (token, active),
         ).fetchone()
 
     if not row:
