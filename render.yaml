@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: |
       pip install -r requirements.txt
-      if [ -f package.json ]; then
+      if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
         npm install
         npm run build
       fi
