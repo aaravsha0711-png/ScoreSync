@@ -319,10 +319,7 @@ def init_db() -> None:
         for statement in schema.split(";"):
             stmt = statement.strip()
             if stmt:
-                try:
-                    conn.execute(stmt)
-                except Exception:
-                    pass
+                conn.execute(stmt)
 
         _ensure_compositions_schema(conn)
 

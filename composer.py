@@ -737,12 +737,13 @@ def get_composition(comp_id: int, user=Depends(get_current_user)):
         drum    = conn.execute(f"SELECT * FROM drum_patterns WHERE composition_id={ph}", (comp_id,)).fetchone()
         rolls   = conn.execute(f"SELECT * FROM piano_rolls WHERE composition_id={ph}", (comp_id,)).fetchall()
         samples = conn.execute(f"SELECT * FROM samples WHERE composition_id={ph}", (comp_id,)).fetchall()
+    comp_row = dict(comp)
     return {
-        "id": comp["id"], "title": comp["title"], "key": comp["key"],
-        "mode": comp["mode"], "tempo": comp["tempo"],
-        "time_signature": comp["time_signature"], "measures": comp["measures"],
-        "style": comp.get("style", "neutral") if isinstance(comp, dict) else comp["style"],
-        "sections": json.loads(comp["sections_json"]) if comp.get("sections_json") else DEFAULT_SECTIONS,
+        "id": comp_row["id"], "title": comp_row["title"], "key": comp_row["key"],
+        "mode": comp_row["mode"], "tempo": comp_row["tempo"],
+        "time_signature": comp_row["time_signature"], "measures": comp_row["measures"],
+        "style": comp_row.get("style", "neutral"),
+        "sections": json.loads(comp_row["sections_json"]) if comp_row.get("sections_json") else DEFAULT_SECTIONS,
         "parts": [{"role": p["role"], "instrument": p["instrument"], "notes": json.loads(p["notes_json"])} for p in parts],
         "drum_pattern": {"pattern": json.loads(drum["pattern_json"]), "steps": drum["steps"], "swing": drum["swing"]} if drum else None,
         "piano_rolls": [{"part_role": r["part_role"], "cells": json.loads(r["cells_json"])} for r in rolls],
@@ -983,8 +984,9 @@ def export_xml(comp_id: int, user=Depends(get_current_user)):
         if not comp:
             raise HTTPException(404, "Not found")
         parts = conn.execute(f"SELECT * FROM composition_parts WHERE composition_id={ph}", (comp_id,)).fetchall()
-    xml = _composition_to_musicxml(dict(comp), [dict(p) for p in parts])
-    filename = comp["title"].replace(" ","_") + ".xml"
+    comp_row = dict(comp)
+    xml = _composition_to_musicxml(comp_row, [dict(p) for p in parts])
+    filename = comp_row["title"].replace(" ","_") + ".xml"
     return Response(content=xml, media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
@@ -992,4 +994,3 @@ def export_xml(comp_id: int, user=Depends(get_current_user)):
 @router.get("/health")
 def composer_health():
     return {"status": "ok", "styles": len(STYLE_CATALOG)}
-

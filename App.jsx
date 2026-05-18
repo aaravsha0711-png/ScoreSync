@@ -1,10 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { apiRequest, normalizeProfile, calibrationToRequest } from "./api.js";
 import { styles } from "./styles.js";
-import { TRANSPOSITIONS, NOTE_NAMES, MAJOR_SCALES, MEYER_SCALES } from "./constants.js";
-import { yin, freqToMidi, midiToNoteName, freqToNoteLabel, centsDiff } from "./pitchUtils.js";
+import { TRANSPOSITIONS, NOTE_NAMES, MAJOR_SCALES, MEYER_SCALES, MIN_NOTE_STABILITY_MS } from "./constants.js";
+import {
+  yin, freqToMidi, midiToNoteName, freqToNoteLabel, centsDiff,
+  computeRMS, computeSpectralCentroid, computeSpectralFlatness, detectVibratoFromHistory,
+} from "./pitchUtils.js";
+import {
+  analyzeMarkings, extractScoreNoteNames, extractRestAlerts, generateMarkingSuggestions,
+} from "./scoreUtils.js";
+import { startVoiceRecognition } from "./voiceRecognition.js";
 import ComposerOverlay from "./ComposerOverlay.jsx";
-import MainScreen from "./MainScreen.jsx";
 import "./audioPlayback.js";
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
