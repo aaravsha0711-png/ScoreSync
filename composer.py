@@ -47,20 +47,6 @@ def _now() -> str:
 # ───────────────────────────────────────────────────────────────────────────────
 
 _PG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS compositions (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL DEFAULT 'Untitled',
-    key TEXT NOT NULL DEFAULT 'C',
-    mode TEXT NOT NULL DEFAULT 'major',
-    tempo INTEGER NOT NULL DEFAULT 120,
-    time_signature TEXT NOT NULL DEFAULT '4/4',
-    measures INTEGER NOT NULL DEFAULT 8,
-    style TEXT NOT NULL DEFAULT 'neutral',
-    sections_json TEXT NOT NULL DEFAULT '[]',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
 CREATE TABLE IF NOT EXISTS composition_parts (
     id SERIAL PRIMARY KEY,
     composition_id INTEGER NOT NULL,
@@ -104,20 +90,6 @@ CREATE TABLE IF NOT EXISTS samples (
 """
 
 _SQLITE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS compositions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL DEFAULT 'Untitled',
-    key TEXT NOT NULL DEFAULT 'C',
-    mode TEXT NOT NULL DEFAULT 'major',
-    tempo INTEGER NOT NULL DEFAULT 120,
-    time_signature TEXT NOT NULL DEFAULT '4/4',
-    measures INTEGER NOT NULL DEFAULT 8,
-    style TEXT NOT NULL DEFAULT 'neutral',
-    sections_json TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
 CREATE TABLE IF NOT EXISTS composition_parts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     composition_id INTEGER NOT NULL,

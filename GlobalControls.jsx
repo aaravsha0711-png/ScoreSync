@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import ThemeToggle from './ThemeToggle.jsx';
 import ShareButton from './ShareButton.jsx';
 
 export default function GlobalControls() {
   const isSharedPage = /^\/shared\//.test(window.location.pathname);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    // Only show the share button when the user has an active session.
+    fetch('/auth/me', { credentials: 'include' })
+      .then(r => setIsLoggedIn(r.ok))
+      .catch(() => setIsLoggedIn(false));
+  }, []);
 
   if (isSharedPage) {
     return null;
@@ -27,7 +35,7 @@ export default function GlobalControls() {
       }}
     >
       <ThemeToggle />
-      <ShareButton />
+      {isLoggedIn && <ShareButton />}
     </div>
   );
 }
