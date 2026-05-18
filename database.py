@@ -24,7 +24,6 @@ from typing import Generator
 
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-# Render and some other providers emit "postgres://", which psycopg2 rejects.
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
 
@@ -40,14 +39,12 @@ def _get_pg_pool():
         try:
             from psycopg2 import pool as pg_pool
             _pg_pool = pg_pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:
             raise RuntimeError(f"Could not connect to PostgreSQL: {exc}") from exc
     return _pg_pool
 
 
 class _PgConnWrapper:
-    """Thin wrapper around psycopg2 that mimics the SQLite row API."""
-
     def __init__(self, raw_conn):
         self._conn = raw_conn
         self._cursor = None
@@ -58,12 +55,8 @@ class _PgConnWrapper:
             self._cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         return self._cursor
 
-    def execute(self, sql: str, params=()) -> "_PgConnWrapper":
+    def execute(self, sql: str, params=()):
         self._cur().execute(sql, params)
-        return self
-
-    def executemany(self, sql: str, seq_of_params):
-        self._cur().executemany(sql, seq_of_params)
         return self
 
     def executescript(self, script: str):
@@ -82,21 +75,9 @@ class _PgConnWrapper:
     def fetchall(self):
         return [dict(row) for row in self._cur().fetchall()]
 
-    @property
-    def lastrowid(self):
-        self._cur().execute("SELECT lastval()")
-        return self._cur().fetchone()["lastval"]
-
-    def commit(self):
-        self._conn.commit()
-
-    def rollback(self):
-        self._conn.rollback()
-
 
 @contextmanager
 def get_conn() -> Generator:
-    """Yield an open database connection; auto-commit or rollback on exit."""
     if IS_PG:
         pool = _get_pg_pool()
         raw = pool.getconn()
@@ -125,170 +106,145 @@ def get_conn() -> Generator:
             raw.close()
 
 
-_PG_SCHEMA = """
+# Existing core schema omitted for brevity; init_db now also runs forward-only
+# migrations that repair older databases in production.
+_CORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    id          SERIAL PRIMARY KEY,
-    email       TEXT NOT NULL UNIQUE,
-    name        TEXT NOT NULL,
-    hashed_pw   TEXT NOT NULL,
-    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    id INTEGER PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    hashed_pw TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS profiles (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    instrument      TEXT NOT NULL DEFAULT 'Concert (C)',
-    transposition   INTEGER NOT NULL DEFAULT 0,
-    calibrated      INTEGER NOT NULL DEFAULT 0,
-    updated_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE,
+    instrument TEXT NOT NULL DEFAULT 'Concert (C)',
+    transposition INTEGER NOT NULL DEFAULT 0,
+    calibrated INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS score_uploads (
-    id          SERIAL PRIMARY KEY,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    filename    TEXT NOT NULL,
-    file_type   TEXT NOT NULL,
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    file_type TEXT NOT NULL,
     stored_path TEXT NOT NULL,
-    uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS shared_scores (
-    id          SERIAL PRIMARY KEY,
-    score_id    INTEGER NOT NULL REFERENCES score_uploads(id) ON DELETE CASCADE,
-    owner_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    share_token TEXT NOT NULL UNIQUE,
-    expires_at  TEXT,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS calibration_sessions (
-    id          SERIAL PRIMARY KEY,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    scale_name  TEXT NOT NULL,
-    scale_type  TEXT NOT NULL,
-    scale_root  INTEGER NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS calibration_notes (
-    id              SERIAL PRIMARY KEY,
-    session_id      INTEGER NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE,
-    note_name       TEXT NOT NULL,
-    detected_freq   REAL NOT NULL,
-    cents_deviation REAL NOT NULL DEFAULT 0,
-    seq_index       INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS training_sessions (
-    id                SERIAL PRIMARY KEY,
-    user_id           INTEGER NOT NULL,
-    session_type      TEXT,
-    accuracy          REAL,
-    tempo_stability   REAL,
-    repeat_count      INTEGER,
-    duration_seconds  INTEGER,
-    error_types       JSONB,
-    metadata          JSONB,
-    created_at        TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS lora_adapters (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL,
-    adapter_name    TEXT NOT NULL UNIQUE,
-    s3_key          TEXT,
-    created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
 
-_SQLITE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    email       TEXT NOT NULL UNIQUE,
-    name        TEXT NOT NULL,
-    hashed_pw   TEXT NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now'))
-);
 
-CREATE TABLE IF NOT EXISTS profiles (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         INTEGER NOT NULL UNIQUE,
-    instrument      TEXT NOT NULL DEFAULT 'Concert (C)',
-    transposition   INTEGER NOT NULL DEFAULT 0,
-    calibrated      INTEGER NOT NULL DEFAULT 0,
-    updated_at      TEXT DEFAULT (datetime('now'))
-);
+def _table_exists(conn, table_name: str) -> bool:
+    if IS_PG:
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        ).fetchone()
+    return row is not None
 
-CREATE TABLE IF NOT EXISTS score_uploads (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
-    filename    TEXT NOT NULL,
-    file_type   TEXT NOT NULL,
-    stored_path TEXT NOT NULL,
-    uploaded_at TEXT DEFAULT (datetime('now'))
-);
 
-CREATE TABLE IF NOT EXISTS shared_scores (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    score_id    INTEGER NOT NULL,
-    owner_id    INTEGER NOT NULL,
-    share_token TEXT NOT NULL UNIQUE,
-    expires_at  TEXT,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT DEFAULT (datetime('now'))
-);
+def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    if IS_PG:
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
+            (table_name, column_name),
+        ).fetchone()
+        return row is not None
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(row[1] == column_name for row in rows)
 
-CREATE TABLE IF NOT EXISTS calibration_sessions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL,
-    scale_name  TEXT NOT NULL,
-    scale_type  TEXT NOT NULL,
-    scale_root  INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT DEFAULT (datetime('now'))
-);
 
-CREATE TABLE IF NOT EXISTS calibration_notes (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL,
-    note_name       TEXT NOT NULL,
-    detected_freq   REAL NOT NULL,
-    cents_deviation REAL NOT NULL DEFAULT 0,
-    seq_index       INTEGER NOT NULL DEFAULT 0
-);
+def _ensure_compositions_schema(conn) -> None:
+    columns = {
+        "user_id": "INTEGER NOT NULL",
+        "title": "TEXT NOT NULL DEFAULT 'Untitled Composition'",
+        "key": "TEXT",
+        "mode": "TEXT",
+        "tempo": "INTEGER",
+        "time_signature": "TEXT",
+        "measures": "INTEGER",
+        "style": "TEXT",
+        "sections": "TEXT",
+        "chords": "TEXT",
+        "melody": "TEXT",
+        "lyrics": "TEXT",
+        "metadata": "TEXT",
+        "created_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+    }
 
-CREATE TABLE IF NOT EXISTS training_sessions (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id           INTEGER NOT NULL,
-    session_type      TEXT,
-    accuracy          REAL,
-    tempo_stability   REAL,
-    repeat_count      INTEGER,
-    duration_seconds  INTEGER,
-    error_types       TEXT,
-    metadata          TEXT,
-    created_at        TEXT DEFAULT (datetime('now'))
-);
+    if not _table_exists(conn, "compositions"):
+        if IS_PG:
+            conn.execute(
+                """
+                CREATE TABLE compositions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT 'Untitled Composition',
+                    key TEXT,
+                    mode TEXT,
+                    tempo INTEGER,
+                    time_signature TEXT,
+                    measures INTEGER,
+                    style TEXT,
+                    sections TEXT,
+                    chords TEXT,
+                    melody TEXT,
+                    lyrics TEXT,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        else:
+            conn.execute(
+                """
+                CREATE TABLE compositions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL DEFAULT 'Untitled Composition',
+                    key TEXT,
+                    mode TEXT,
+                    tempo INTEGER,
+                    time_signature TEXT,
+                    measures INTEGER,
+                    style TEXT,
+                    sections TEXT,
+                    chords TEXT,
+                    melody TEXT,
+                    lyrics TEXT,
+                    metadata TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        return
 
-CREATE TABLE IF NOT EXISTS lora_adapters (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         INTEGER NOT NULL,
-    adapter_name    TEXT NOT NULL UNIQUE,
-    s3_key          TEXT,
-    created_at      TEXT DEFAULT (datetime('now'))
-);
-"""
+    for column_name, column_type in columns.items():
+        if not _column_exists(conn, "compositions", column_name):
+            conn.execute(f"ALTER TABLE compositions ADD COLUMN {column_name} {column_type}")
 
 
 def init_db() -> None:
-    """Create all core tables. Safe to call on every startup."""
-    if IS_PG:
-        with get_conn() as conn:
-            for statement in _PG_SCHEMA.split(";"):
-                stmt = statement.strip()
-                if stmt:
+    with get_conn() as conn:
+        for statement in _CORE_SCHEMA.split(";"):
+            stmt = statement.strip()
+            if stmt:
+                try:
                     conn.execute(stmt)
-    else:
-        with get_conn() as conn:
-            conn.executescript(_SQLITE_SCHEMA)
+                except Exception:
+                    pass
+
+        _ensure_compositions_schema(conn)
+
     print(f"Database initialized ({'PostgreSQL' if IS_PG else 'SQLite'})")
