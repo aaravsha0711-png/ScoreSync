@@ -36,7 +36,6 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    # Always return JSON so the frontend can safely call response.json().
     return JSONResponse(
         status_code=500,
         content={"detail": str(exc) or "Internal Server Error"},
@@ -67,12 +66,9 @@ UPLOAD_DIR = Path("uploads")
 if UPLOAD_DIR.exists():
     app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
-# Vite builds the frontend into ./dist by default.
-# Keep a fallback to ./static/dist for compatibility with older deployments.
 STATIC_DIST_CANDIDATES = [Path("dist"), Path("static/dist")]
 STATIC_DIST = next((path for path in STATIC_DIST_CANDIDATES if path.exists()), Path("dist"))
 
-# Serve compiled assets (e.g. /assets/index-*.js) directly from the build output.
 if STATIC_DIST.exists() and (STATIC_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIST / "assets")), name="assets")
 
@@ -99,6 +95,7 @@ def serve_spa(full_path: str):
         "scores",
         "playback",
         "sharing",
+        "composer",
         "health",
         "docs",
         "openapi.json",
