@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,10 +20,26 @@ class ShareRequest(BaseModel):
     expires_in_days: int = 30
 
 
+def _is_expired(expires_at) -> bool:
+    """Return True if the share link has expired. Handles both string (SQLite)
+    and datetime (PostgreSQL TIMESTAMPTZ) values."""
+    if not expires_at:
+        return False
+    if isinstance(expires_at, datetime):
+        exp = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+    else:
+        raw = str(expires_at).replace("Z", "+00:00")
+        try:
+            exp = datetime.fromisoformat(raw)
+            if not exp.tzinfo:
+                exp = exp.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+    return exp < datetime.now(timezone.utc)
+
+
 def _active_value():
     return True if IS_PG else 1
-
-
 def _create_share_for_score(score_id: int, user_id: int, expires_in_days: int):
     token = secrets.token_urlsafe(24)
     expires_at = (datetime.utcnow() + timedelta(days=max(1, expires_in_days))).isoformat()
@@ -90,7 +106,7 @@ def get_shared_score(token: str):
     if not row:
         raise HTTPException(status_code=404, detail="Shared score not found")
 
-    if row["expires_at"] and datetime.fromisoformat(str(row["expires_at"]).replace('Z', '')) < datetime.utcnow():
+    if _is_expired(row["expires_at"]):
         raise HTTPException(status_code=410, detail="Share link has expired")
 
     return {
@@ -152,7 +168,7 @@ def download_shared_score(token: str):
     if not row:
         raise HTTPException(status_code=404, detail="Shared score not found")
 
-    if row["expires_at"] and datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00").replace("+00:00", "")) < datetime.utcnow():
+    if _is_expired(row["expires_at"]):
         raise HTTPException(status_code=410, detail="Share link has expired")
 
     data = _read_stored_file(row["stored_path"])

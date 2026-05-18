@@ -390,62 +390,6 @@ def musescore_status(_: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/metronome")
-async def generate_metronome(
-    tempo_bpm: int,
-    time_signature: str = "4/4",
-    duration_beats: int = 8,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Generate a simple metronome click track (WAV).
-    Parameters:
-    - tempo_bpm: Beats per minute
-    - time_signature: e.g., "4/4", "3/4", "6/8"
-    - duration_beats: Number of beats to generate
-
-    Returns WAV file with metronome clicks.
-    """
-    sample_rate = 44100
-    frequency = 1000  # Hz
-    beat_duration = 60 / tempo_bpm  # seconds per beat
-    samples_per_beat = int(sample_rate * beat_duration)
-    click_length = int(sample_rate * 0.05)  # 50ms clicks
-
-    audio_data = bytearray()
-    beats_per_measure = int(time_signature.split("/")[0])
-
-    for beat in range(duration_beats):
-        # Accent first beat of measure (louder)
-        is_accented = (beat % beats_per_measure) == 0
-        amplitude = 32000 if is_accented else 16000
-
-        # Generate sine wave click
-        for i in range(click_length):
-            phase = 2 * math.pi * frequency * i / sample_rate
-            sample = int(amplitude * math.sin(phase))
-            audio_data.extend(struct.pack('<h', sample))
-
-        # Silence until next beat
-        silence = samples_per_beat - click_length
-        audio_data.extend(b'\x00' * (silence * 2))
-
-    # Create WAV buffer
-    wav_buffer = io.BytesIO()
-    with wave.open(wav_buffer, 'wb') as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
-        wav.writeframes(bytes(audio_data))
-
-    wav_bytes = wav_buffer.getvalue()
-    return Response(
-        content=wav_bytes,
-        media_type="audio/wav",
-        headers={"Content-Disposition": "attachment; filename=\"metronome.wav\""},
-    )
-
-
 @router.post("/rhythm-info")
 async def get_rhythm_info(
     file: UploadFile = File(...),

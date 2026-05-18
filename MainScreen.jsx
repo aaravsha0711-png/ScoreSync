@@ -60,7 +60,7 @@ export default function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [trainingMode, setTrainingMode]           = useState(false);
   const [trainingSegments, setTrainingSegments]   = useState([]);
   const [scoreNoteNames, setScoreNoteNames]       = useState([]);
-  const [numberOfSegments]                        = useState(4);
+  const [numberOfSegments, setNumberOfSegments]   = useState(4);  // eslint-disable-line no-unused-vars
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const scoreContainerRef   = useRef(null);
@@ -83,6 +83,7 @@ export default function MainScreen({ user, profile, onLogout, onRecalibrate }) {
   const [settings, setSettings] = useState({
     stopAtWrongNote: true,
     loopOnWrongNote: false,
+    pauseOnSilence: false,
     metronomeSource: "backend",
     metronomeEnabled: false,
     restAlertEnabled: true,
@@ -212,9 +213,33 @@ export default function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       });
       setComplexMarkings(markingsList);
     } else if (["mscz", "mscx"].includes(ext)) {
+      setOsmdError(null);
       setScore(null);
       setScoreType("musescore");
       setMarkings([]);
+      setErrorMessage(null);
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const response = await fetch("/scores/upload", { method: "POST", credentials: "include", body: formData });
+        const result = await response.json();
+        if (!response.ok) { setErrorMessage(result?.detail || "MuseScore upload failed."); return; }
+        if (result.musicxml_base64) {
+          const xmlText = atob(result.musicxml_base64);
+          setScore(xmlText); setScoreType("musicxml");
+          setMarkings(analyzeMarkings(xmlText));
+          const rhythmMatch = xmlText.match(/<time>\s*<beats>(\d+)<\/beats>\s*<beat-type>(\d+)<\/beat-type>/);
+          const timeSignature = rhythmMatch ? `${rhythmMatch[1]}/${rhythmMatch[2]}` : "4/4";
+          const tempoMatch = xmlText.match(/<metronome>[\s\S]*?<per-minute>(\d+)<\/per-minute>/);
+          const tempo = tempoMatch ? parseInt(tempoMatch[1]) : 120;
+          setRhythmInfo({ time_signature: timeSignature, tempo_bpm: tempo, note_count: (xmlText.match(/<note\b/g)||[]).length, rest_count: (xmlText.match(/<rest\b/g)||[]).length });
+          setMetronomeState(prev => ({ ...prev, bpm: tempo }));
+          setScoreNoteNames(extractScoreNoteNames(xmlText));
+          setRestAlerts(extractRestAlerts(xmlText));
+        } else if (result.conversion_warning) {
+          setErrorMessage(`MuseScore uploaded but could not be auto-converted: ${result.conversion_warning}`);
+        }
+      } catch (err) { setErrorMessage(`MuseScore upload error: ${err.message}`); }
     } else {
       setErrorMessage("Supported: .pdf, .xml, .musicxml, .mxl, .mscz, .mscx");
     }
@@ -952,7 +977,7 @@ export default function MainScreen({ user, profile, onLogout, onRecalibrate }) {
       <audio ref={audioElementRef} style={{ display:"none" }}/>
 
       {/* Composer overlay */}
-      {showComposer && <ComposerOverlay userId={user.id} onClose={() => setShowComposer(false)} />}
+      {showComposer && <ComposerOverlay onClose={() => setShowComposer(false)} />}
     </div>
   );
 }

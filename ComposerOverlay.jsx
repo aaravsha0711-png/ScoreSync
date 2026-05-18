@@ -94,6 +94,14 @@ const S = {
 // ─── ScoreStrip ───────────────────────────────────────────────────────────────
 function ScoreStrip({ notes, color, totalMeasures, sections = [] }) {
   const W = 700, H = 56;
+  if (!notes || notes.length === 0) {
+    return (
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display:"block" }}>
+        <rect width={W} height={H} fill="#111009" rx="4"/>
+        <text x={W/2} y={H/2} textAnchor="middle" dominantBaseline="central" fontSize={11} fill="#3a2e18">No notes generated</text>
+      </svg>
+    );
+  }
   const midis = notes.map(n => n.pitch_midi || 60);
   const lo = Math.min(...midis, 48);
   const hi = Math.max(...midis, 84);
@@ -393,10 +401,8 @@ function SamplePanel({ compId, totalMeasures, samples, onRefresh }) {
     fd.append("volume", "1.0");
     fd.append("loop", "false");
     try {
-      const token = localStorage.getItem("ss_token") || "";
       const res = await fetch(`/composer/compositions/${compId}/samples/upload`, {
-        method:"POST", body: fd,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        method:"POST", body: fd, credentials: "include",
       });
       if (!res.ok) throw new Error(await res.text());
       setStatus(`Uploaded: ${file.name}`);
@@ -704,7 +710,10 @@ export default function ComposerOverlay({ onClose }) {
         { type:"outro",  measures:4,  label:"Outro" },
       ]);
     }
-  }, [useSections]);
+    if (!useSections) {
+      setSections([]);
+    }
+  }, [useSections]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function flash(msg) { setSaveStatus(msg); setTimeout(() => setSaveStatus(""), 4000); }
@@ -786,10 +795,10 @@ export default function ComposerOverlay({ onClose }) {
     try {
       const effectiveStyle = styleOverrides[role] || activeComp.style || "neutral";
       const endpoint = {
-        counter_melody: "/composer/generate/counter_melody",
         harmony:        "/composer/generate/harmony",
         bass:           "/composer/generate/bass",
-      }[role] || "/composer/generate/melody";
+        drums:          "/composer/generate/drums",
+      }[role] || "/composer/generate/melody";  // melody, counter_melody, other → melody
 
       const existingMelody = activeComp.parts.find(p => p.role === "melody")?.notes || [];
       const result = await apiRequest(endpoint, {
@@ -820,6 +829,8 @@ export default function ComposerOverlay({ onClose }) {
         method:"POST",
         body: JSON.stringify({
           key: activeComp.key, mode: activeComp.mode,
+          measures: totalMeasures,
+          tempo: activeComp.tempo,
           time_signature: activeComp.time_signature,
           style: activeComp.style || "neutral",
         }),

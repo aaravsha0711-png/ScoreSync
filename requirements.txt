@@ -1,11 +1,14 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 psycopg2-binary
 boto3
 numpy
-SQLAlchemy==2.0.36
+music21
+librosa
+soundfile
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt<4.1
 email-validator
+verovio

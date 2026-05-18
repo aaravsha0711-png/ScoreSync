@@ -946,7 +946,14 @@ def gen_drums(body: GenerateRequest, user=Depends(get_current_user)):
 
 @router.post("/generate/song")
 def gen_song(body: GenerateRequest, user=Depends(get_current_user)):
-    result = _generate_full_song(body.key, body.mode, DEFAULT_SECTIONS, body.time_signature, body.style, body.seed_notes)
+    # Use DEFAULT_SECTIONS but scale each section's measure count so the
+    # total matches what the caller requested (body.measures).
+    sections = DEFAULT_SECTIONS
+    if body.measures and body.measures != 8:
+        default_total = sum(s["measures"] for s in DEFAULT_SECTIONS)
+        scale = body.measures / default_total
+        sections = [{**s, "measures": max(1, round(s["measures"] * scale))} for s in DEFAULT_SECTIONS]
+    result = _generate_full_song(body.key, body.mode, sections, body.time_signature, body.style, body.seed_notes)
     result["engine"] = "contextual_local_song"
     return result
 

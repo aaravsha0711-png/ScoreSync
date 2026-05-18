@@ -17,6 +17,13 @@ SECRET_KEY: str = os.environ.get(
     "SCORESYNC_SECRET",
     "change-me-in-production-use-a-long-random-string-here-32chars+"
 )
+if SECRET_KEY == "change-me-in-production-use-a-long-random-string-here-32chars+":
+    import warnings
+    warnings.warn(
+        "SCORESYNC_SECRET is using the default placeholder value. "
+        "Set a strong random secret via the SCORESYNC_SECRET environment variable.",
+        stacklevel=1,
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

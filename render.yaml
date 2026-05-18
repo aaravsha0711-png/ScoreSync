@@ -17,7 +17,7 @@ services:
         value: 3.11.9
       - key: NODE_VERSION
         value: 20.19.0
-      - key: SECRET_KEY
+      - key: SCORESYNC_SECRET
         generateValue: true
       - key: ENVIRONMENT
         value: production
