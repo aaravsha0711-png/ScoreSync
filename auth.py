@@ -45,7 +45,15 @@ class AuthUserResponse(BaseModel):
 
 
 def _set_auth_cookie(response: Response, token: str):
-    response.set_cookie(key=COOKIE_NAME, value=token, max_age=COOKIE_MAX_AGE, httponly=True, secure=os.environ.get("ENVIRONMENT", "").lower() == "production", samesite="lax", path="/")
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        secure=os.environ.get("ENVIRONMENT", "").lower() == "production",
+        samesite="lax",
+        path="/",
+    )
 
 
 @router.post("/register", response_model=AuthUserResponse, status_code=status.HTTP_201_CREATED)
@@ -54,16 +62,29 @@ def register(body: RegisterRequest, response: Response):
     with get_conn() as conn:
         existing = conn.execute(f"SELECT id FROM users WHERE email = {ph}", (body.email,)).fetchone()
         if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with that email already exists.")
-        cursor = conn.execute(
-            f"INSERT INTO users (email, name, hashed_pw) VALUES ({ph},{ph},{ph})",
-            (body.email, body.name, hash_password(body.password))
-        )
-        user_id = cursor.lastrowid
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with that email already exists.",
+            )
+
+        if IS_PG:
+            row = conn.execute(
+                "INSERT INTO users (email, name, hashed_pw) VALUES (%s,%s,%s) RETURNING id",
+                (body.email, body.name, hash_password(body.password)),
+            ).fetchone()
+            user_id = row["id"]
+        else:
+            cursor = conn.execute(
+                f"INSERT INTO users (email, name, hashed_pw) VALUES ({ph},{ph},{ph})",
+                (body.email, body.name, hash_password(body.password)),
+            )
+            user_id = cursor.lastrowid
+
         conn.execute(
             f"INSERT INTO profiles (user_id, instrument, transposition) VALUES ({ph},{ph},{ph})",
-            (user_id, "Concert (C)", 0)
+            (user_id, "Concert (C)", 0),
         )
+
     _set_auth_cookie(response, create_access_token(body.email))
     return AuthUserResponse(user_id=user_id, email=body.email, name=body.name)
 
@@ -72,9 +93,15 @@ def register(body: RegisterRequest, response: Response):
 def login(body: LoginRequest, response: Response):
     ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
-        row = conn.execute(f"SELECT id, email, name, hashed_pw FROM users WHERE email = {ph}", (body.email,)).fetchone()
+        row = conn.execute(
+            f"SELECT id, email, name, hashed_pw FROM users WHERE email = {ph}",
+            (body.email,),
+        ).fetchone()
     if not row or not verify_password(body.password, row["hashed_pw"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password.",
+        )
     _set_auth_cookie(response, create_access_token(row["email"]))
     return AuthUserResponse(user_id=row["id"], email=row["email"], name=row["name"])
 
@@ -88,5 +115,8 @@ def logout(response: Response):
 def me(current_user: dict = Depends(get_current_user)):
     ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
-        profile = conn.execute(f"SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = {ph}", (current_user["id"],)).fetchone()
+        profile = conn.execute(
+            f"SELECT instrument, transposition, calibrated FROM profiles WHERE user_id = {ph}",
+            (current_user["id"],),
+        ).fetchone()
     return {**current_user, "profile": dict(profile) if profile else None}
