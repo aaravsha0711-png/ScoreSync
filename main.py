@@ -15,6 +15,7 @@ from composer import router as composer_router, init_composer_tables
 from database import init_db
 from playback import router as playback_router
 from profile import router as profile_router
+from score_library import router as score_library_router
 from scores import router as scores_router
 from sharing import router as sharing_router
 
@@ -64,6 +65,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(scores_router)
+app.include_router(score_library_router)
 app.include_router(playback_router)
 app.include_router(profile_router)
 app.include_router(sharing_router)

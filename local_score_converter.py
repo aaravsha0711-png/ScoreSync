@@ -145,7 +145,7 @@ def convert_to_pdf(mscz_bytes: bytes, source_ext: str = ".mscz") -> bytes:
         import verovio  # type: ignore
     except ImportError as exc:
         raise ConversionError(
-"PDF rendering requires the verovio package. "
+            "PDF rendering requires the verovio package. "
             "Install it with: pip install verovio"
         ) from exc
 

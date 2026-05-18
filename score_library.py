@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from database import get_conn
+from database import get_conn, IS_PG
 from deps import get_current_user
 
 router = APIRouter(prefix="/scores", tags=["scores"])
@@ -62,12 +62,13 @@ def _media_type(file_type: str, filename: str) -> str:
 @router.get("/library")
 def list_score_library(current_user: dict = Depends(get_current_user)):
     """Return the user's uploaded score files, newest first."""
+    ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, filename, file_type, uploaded_at
             FROM score_uploads
-            WHERE user_id=?
+            WHERE user_id = {ph}
             ORDER BY uploaded_at DESC, id DESC
             LIMIT 50
             """,
@@ -90,12 +91,13 @@ def list_score_library(current_user: dict = Depends(get_current_user)):
 @router.get("/library/{score_id}/content")
 def get_score_content(score_id: int, current_user: dict = Depends(get_current_user)):
     """Return bytes for one stored score so the frontend can reload it for practice."""
+    ph = "%s" if IS_PG else "?"
     with get_conn() as conn:
         row = conn.execute(
-            """
+            f"""
             SELECT id, filename, file_type, stored_path
             FROM score_uploads
-            WHERE id=? AND user_id=?
+            WHERE id = {ph} AND user_id = {ph}
             """,
             (score_id, current_user["id"]),
         ).fetchone()

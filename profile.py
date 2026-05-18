@@ -130,11 +130,18 @@ def save_calibration(
         conn.execute(f"DELETE FROM calibration_sessions WHERE user_id = {ph}", (user_id,))
 
         for sess in body.sessions:
-            cur = conn.execute(
-                f"INSERT INTO calibration_sessions (user_id, scale_name, scale_type, scale_root) VALUES ({ph},{ph},{ph},{ph})",
-                (user_id, sess.scale_name, sess.scale_type, sess.scale_root),
-            )
-            session_id = cur.lastrowid
+            if IS_PG:
+                row = conn.execute(
+                    "INSERT INTO calibration_sessions (user_id, scale_name, scale_type, scale_root) VALUES (%s,%s,%s,%s) RETURNING id",
+                    (user_id, sess.scale_name, sess.scale_type, sess.scale_root),
+                ).fetchone()
+                session_id = row["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO calibration_sessions (user_id, scale_name, scale_type, scale_root) VALUES (?,?,?,?)",
+                    (user_id, sess.scale_name, sess.scale_type, sess.scale_root),
+                )
+                session_id = cur.lastrowid
             for note in sess.notes:
                 conn.execute(
                     f"INSERT INTO calibration_notes (session_id, note_name, detected_freq, cents_deviation, seq_index) VALUES ({ph},{ph},{ph},{ph},{ph})",

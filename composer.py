@@ -726,11 +726,18 @@ def create_composition(body: CompositionCreate, user=Depends(get_current_user)):
     ph = _ph()
     sj = json.dumps(body.sections if body.sections else DEFAULT_SECTIONS)
     with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO compositions (user_id,title,key,mode,tempo,time_signature,measures,style,sections_json) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (uid, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sj)
-        )
-        comp_id = cur.lastrowid
+        if IS_PG:
+            row = conn.execute(
+                "INSERT INTO compositions (user_id,title,key,mode,tempo,time_signature,measures,style,sections_json) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (uid, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sj)
+            ).fetchone()
+            comp_id = row["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO compositions (user_id,title,key,mode,tempo,time_signature,measures,style,sections_json) VALUES (?,?,?,?,?,?,?,?,?)",
+                (uid, body.title, body.key, body.mode, body.tempo, body.time_signature, body.measures, body.style, sj)
+            )
+            comp_id = cur.lastrowid
     return {"id": comp_id, "title": body.title}
 
 
@@ -862,11 +869,18 @@ def add_sample(comp_id: int, body: SampleData, user=Depends(get_current_user)):
     _assert_owns(comp_id, user)
     uid = _user_id(user); ph = _ph()
     with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO samples (composition_id,user_id,name,source_type,source_url,layer_role,start_measure,end_measure,volume,loop) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (comp_id, uid, body.name, body.source_type, body.source_url, body.layer_role, body.start_measure, body.end_measure, body.volume, 1 if body.loop else 0)
-        )
-        sample_id = cur.lastrowid
+        if IS_PG:
+            row = conn.execute(
+                "INSERT INTO samples (composition_id,user_id,name,source_type,source_url,layer_role,start_measure,end_measure,volume,loop) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (comp_id, uid, body.name, body.source_type, body.source_url, body.layer_role, body.start_measure, body.end_measure, body.volume, 1 if body.loop else 0)
+            ).fetchone()
+            sample_id = row["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO samples (composition_id,user_id,name,source_type,source_url,layer_role,start_measure,end_measure,volume,loop) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (comp_id, uid, body.name, body.source_type, body.source_url, body.layer_role, body.start_measure, body.end_measure, body.volume, 1 if body.loop else 0)
+            )
+            sample_id = cur.lastrowid
     return {"id": sample_id, "name": body.name}
 
 
@@ -890,13 +904,19 @@ async def upload_sample(
     content = await file.read()
     with open(fpath, "wb") as f:
         f.write(content)
-    ph = _ph()
     with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO samples (composition_id,user_id,name,source_type,file_path,layer_role,start_measure,volume,loop) VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (comp_id, uid, file.filename or fname, "upload", fpath, layer_role, start_measure, volume, 1 if loop else 0)
-        )
-        sample_id = cur.lastrowid
+        if IS_PG:
+            row = conn.execute(
+                "INSERT INTO samples (composition_id,user_id,name,source_type,file_path,layer_role,start_measure,volume,loop) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (comp_id, uid, file.filename or fname, "upload", fpath, layer_role, start_measure, volume, 1 if loop else 0)
+            ).fetchone()
+            sample_id = row["id"]
+        else:
+            cur = conn.execute(
+                "INSERT INTO samples (composition_id,user_id,name,source_type,file_path,layer_role,start_measure,volume,loop) VALUES (?,?,?,?,?,?,?,?,?)",
+                (comp_id, uid, file.filename or fname, "upload", fpath, layer_role, start_measure, volume, 1 if loop else 0)
+            )
+            sample_id = cur.lastrowid
     return {"id": sample_id, "name": file.filename, "file_path": fpath}
 
 
