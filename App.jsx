@@ -23,6 +23,7 @@ export default function App() {
   const [authForm, setAuthForm]     = useState({ email: "", password: "", name: "" });
   const [authError, setAuthError]   = useState("");
   const [authLoading, setAuthLoading] = useState(true);
+  const [authBusy, setAuthBusy]     = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,11 +40,16 @@ export default function App() {
   }, []);
 
   async function handleLogin() {
+    if (!authForm.email || !authForm.password) {
+      setAuthError("Email and password are required.");
+      return;
+    }
     setAuthError("");
+    setAuthBusy(true);
     try {
       const payload = await apiRequest("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email: authForm.email, password: authForm.password }),
+        body: JSON.stringify({ email: authForm.email.trim(), password: authForm.password }),
       });
       const me = await apiRequest("/auth/me").catch(() => ({ ...payload, id: payload.user_id, profile: null }));
       setUser({ id: me.id || payload.user_id, email: me.email, name: me.name });
@@ -51,22 +57,31 @@ export default function App() {
       setScreen("main");
     } catch (err) {
       setAuthError(err.message || "Sign in failed.");
+    } finally {
+      setAuthBusy(false);
     }
   }
 
   async function handleSignup() {
     if (!authForm.email || !authForm.password || !authForm.name) { setAuthError("All fields required."); return; }
     setAuthError("");
+    setAuthBusy(true);
     try {
       const payload = await apiRequest("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ email: authForm.email, password: authForm.password, name: authForm.name }),
+        body: JSON.stringify({
+          email: authForm.email.trim(),
+          password: authForm.password,
+          name: authForm.name.trim(),
+        }),
       });
       setUser({ id: payload.user_id, email: payload.email, name: payload.name });
       setProfile({ instrument: "Concert (C)", calibration: { skipped: true } });
       setScreen("instrument");
     } catch (err) {
       setAuthError(err.message || "Account creation failed.");
+    } finally {
+      setAuthBusy(false);
     }
   }
 
@@ -110,7 +125,7 @@ export default function App() {
   }
 
   if (screen === "auth") return (
-    <AuthScreen mode={authMode} form={authForm} error={authError}
+    <AuthScreen mode={authMode} form={authForm} error={authError} busy={authBusy}
       onFormChange={f => setAuthForm(f)}
       onLogin={handleLogin}
       onSignup={handleSignup}
@@ -142,11 +157,12 @@ export default function App() {
 
 // ─── Auth Screen ──────────────────────────────────────────────────────────────
 
-function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onToggleMode }) {
+function AuthScreen({ mode, form, error, busy, onFormChange, onLogin, onSignup, onToggleMode }) {
   const isLogin = mode === "login";
+  const submitLabel = busy ? (isLogin ? "Signing In..." : "Creating Account...") : (isLogin ? "Sign In" : "Create Account");
   return (
     <div style={styles.authBg}>
-      <div style={styles.authCard}>
+      <form style={styles.authCard} onSubmit={e => { e.preventDefault(); isLogin ? onLogin() : onSignup(); }}>
         <div style={styles.authLogo}>
           <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#C9A84C"/>
@@ -156,21 +172,21 @@ function AuthScreen({ mode, form, error, onFormChange, onLogin, onSignup, onTogg
         </div>
         <h2 style={styles.authTitle}>{isLogin ? "Welcome back" : "Create account"}</h2>
         {!isLogin && (
-          <input style={styles.authInput} placeholder="Display name"
+          <input style={styles.authInput} placeholder="Display name" aria-label="Display name" autoComplete="name" disabled={busy}
             value={form.name} onChange={e => onFormChange({ ...form, name: e.target.value })} />
         )}
-        <input style={styles.authInput} placeholder="Email" type="email"
+        <input style={styles.authInput} placeholder="Email" type="email" aria-label="Email" autoComplete="email" disabled={busy}
           value={form.email} onChange={e => onFormChange({ ...form, email: e.target.value })} />
-        <input style={styles.authInput} placeholder="Password" type="password"
+        <input style={styles.authInput} placeholder="Password" type="password" aria-label="Password" autoComplete={isLogin ? "current-password" : "new-password"} disabled={busy}
           value={form.password} onChange={e => onFormChange({ ...form, password: e.target.value })} />
-        {error && <div style={styles.authError}>{error}</div>}
-        <button style={styles.authBtn} onClick={isLogin ? onLogin : onSignup}>
-          {isLogin ? "Sign In" : "Create Account"}
+        {error && <div style={styles.authError} role="alert">{error}</div>}
+        <button style={{ ...styles.authBtn, opacity: busy ? 0.7 : 1 }} type="submit" disabled={busy}>
+          {submitLabel}
         </button>
-        <button style={styles.authToggle} onClick={onToggleMode}>
+        <button style={styles.authToggle} type="button" onClick={onToggleMode} disabled={busy}>
           {isLogin ? "Need an account? Sign up" : "Have an account? Sign in"}
         </button>
-      </div>
+      </form>
     </div>
   );
 }

@@ -1,100 +1,38 @@
 """
-database.py — dual-mode connection layer.
+database.py - dual-mode connection layer.
 
-PostgreSQL (Render / production): set DATABASE_URL env var to a postgres:// or postgresql:// URL.
-SQLite (local dev): leave DATABASE_URL unset; uses scoresync.db in the working directory.
+PostgreSQL (Render / production): set DATABASE_URL to a postgres:// or
+postgresql:// URL. SQLite (local dev): leave DATABASE_URL unset; this uses
+scoresync.db in the working directory.
 
-All callers use::
+All callers use:
 
     with get_conn() as conn:
         conn.execute(sql, params)
 
 For PostgreSQL, placeholders must be %s.
 For SQLite, placeholders must be ?.
-Use the IS_PG flag (or check DATABASE_URL) to branch when needed.
+Use the IS_PG flag to branch when needed.
 """
 from __future__ import annotations
 
 import os
-<<<<<<< Updated upstream
-from contextlib import contextmanager
-from datetime import datetime
-
-from sqlalchemy import create_engine, Column, Integer, Float, String, JSON, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-=======
 import sqlite3
 from contextlib import contextmanager
 from typing import Generator
->>>>>>> Stashed changes
-
-# ── Config ────────────────────────────────────────────────────────────────────
-
-<<<<<<< Updated upstream
-
-class TrainingSession(Base):
-    __tablename__ = "training_sessions"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer)
-    session_type = Column(String)
-    accuracy = Column(Float)
-    tempo_stability = Column(Float)
-    repeat_count = Column(Integer)
-    duration_seconds = Column(Integer)
-    error_types = Column(JSON)
-    session_metadata = Column("metadata", JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class LoRAAdapterRecord(Base):
-    __tablename__ = "lora_adapters"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer)
-    adapter_name = Column(String, unique=True)
-    s3_key = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database initialized (PostgreSQL / SQLite)")
-
-
-@contextmanager
-def get_conn():
-    """Provide a database session that supports `with get_conn() as conn:`."""
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-def get_db():
-    """FastAPI dependency-compatible generator."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-=======
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-# Render (and some other providers) emit "postgres://" which psycopg2 rejects;
-# normalise to "postgresql://".
+# Render and some other providers emit "postgres://", which psycopg2 rejects.
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
 
 IS_PG: bool = DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgresql+")
 
-# ── PostgreSQL pool (lazy) ────────────────────────────────────────────────────
-
 _pg_pool = None
+_SQLITE_PATH = "scoresync.db"
+
 
 def _get_pg_pool():
     global _pg_pool
@@ -108,21 +46,17 @@ def _get_pg_pool():
 
 
 class _PgConnWrapper:
-    """Thin wrapper around a psycopg2 connection that mimics the SQLite dict-row API."""
+    """Thin wrapper around psycopg2 that mimics the SQLite row API."""
 
     def __init__(self, raw_conn):
         self._conn = raw_conn
         self._cursor = None
-
-    # ---- cursor management --------------------------------------------------
 
     def _cur(self):
         if self._cursor is None or self._cursor.closed:
             import psycopg2.extras
             self._cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         return self._cursor
-
-    # ---- public interface ---------------------------------------------------
 
     def execute(self, sql: str, params=()) -> "_PgConnWrapper":
         self._cur().execute(sql, params)
@@ -133,7 +67,6 @@ class _PgConnWrapper:
         return self
 
     def executescript(self, script: str):
-        """Execute a multi-statement script (PostgreSQL does not have executescript)."""
         cursor = self._conn.cursor()
         for statement in script.split(";"):
             stmt = statement.strip()
@@ -147,7 +80,7 @@ class _PgConnWrapper:
         return dict(row) if row is not None else None
 
     def fetchall(self):
-        return [dict(r) for r in self._cur().fetchall()]
+        return [dict(row) for row in self._cur().fetchall()]
 
     @property
     def lastrowid(self):
@@ -161,20 +94,9 @@ class _PgConnWrapper:
         self._conn.rollback()
 
 
-# ── SQLite row factory ────────────────────────────────────────────────────────
-
-class _DictCursor(sqlite3.Row):
-    """sqlite3.Row already supports dict-style access; this adds .keys()."""
-
-
-_SQLITE_PATH = "scoresync.db"
-
-
-# ── Public context manager ────────────────────────────────────────────────────
-
 @contextmanager
 def get_conn() -> Generator:
-    """Yield an open database connection; auto-commit on clean exit, rollback on error."""
+    """Yield an open database connection; auto-commit or rollback on exit."""
     if IS_PG:
         pool = _get_pg_pool()
         raw = pool.getconn()
@@ -202,8 +124,6 @@ def get_conn() -> Generator:
         finally:
             raw.close()
 
-
-# ── Schema bootstrap ──────────────────────────────────────────────────────────
 
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -361,7 +281,7 @@ CREATE TABLE IF NOT EXISTS lora_adapters (
 
 
 def init_db() -> None:
-    """Create all core tables (idempotent — safe to call on every startup)."""
+    """Create all core tables. Safe to call on every startup."""
     if IS_PG:
         with get_conn() as conn:
             for statement in _PG_SCHEMA.split(";"):
@@ -371,5 +291,4 @@ def init_db() -> None:
     else:
         with get_conn() as conn:
             conn.executescript(_SQLITE_SCHEMA)
-    print(f"✅ Database initialized ({'PostgreSQL' if IS_PG else 'SQLite'})")
->>>>>>> Stashed changes
+    print(f"Database initialized ({'PostgreSQL' if IS_PG else 'SQLite'})")
